@@ -1,0 +1,57 @@
+cc_library_static {
+    name: "libnfc_jni",
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Wno-unused-parameter",
+        "-Werror",
+
+        "-DNXP_UICC_ENABLE",
+    ],
+
+    srcs: [
+        "CondVar.cpp",
+        "DataQueue.cpp",
+        "IntervalTimer.cpp",        
+        "NativeLlcpConnectionlessSocket.cpp",
+        "NativeLlcpServiceSocket.cpp",
+        "NativeLlcpSocket.cpp",
+        "NativeP2pDevice.cpp",
+        "PeerToPeer.cpp",
+        "RouteDataSet.cpp",
+        "PowerSwitch.cpp"
+		],
+
+//    include_dirs: [
+//        "system/nfc/src/nfa/include",
+//        "system/nfc/src/nfc/include",
+//        "system/nfc/src/include",
+//        "system/nfc/src/gki/ulinux",
+//        "system/nfc/src/gki/common",
+//        "system/nfc/utils/include",
+//    ],
+
+	export_include_dirs:[
+		""
+	],
+
+    shared_libs: [
+        "libandroidicu",
+        "libnativehelper",
+        "libcutils",
+        "libutils",
+        "liblog",
+        "libstnfc-nci",
+        "libchrome",
+        "libbase",
+    ],
+
+    static_libs: ["libxml2"],
+
+    product_variables: {
+        debuggable: {
+            cflags: ["-DDCHECK_ALWAYS_ON"],
+        },
+    },
+}

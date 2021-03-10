@@ -1,0 +1,50 @@
+VOB_COMPONENTS = "vendor/st/nfc/system/nfc/src"
+NFA = "vendor/st/nfc/system/nfc/src/nfa"
+NFC = "vendor/st/nfc/system/nfc/src/nfc"
+//NCI = "vendor/st/nfc/packages/app/Nfc/nci/jni"
+NCI = "../../nci/jni"
+
+cc_library_shared {
+    name: "libstnfc_nci_jni",
+
+    cflags: [ 
+        "-Wall",
+        "-Wextra",
+        "-DST21NFC",
+    ] ,
+
+    srcs: ["*.cpp"],
+
+//    include_dirs: [
+//        "external/libxml2/include",
+//        "frameworks/native/include",
+//        NFA + "/include",
+//        NFC + "/include",
+//        VOB_COMPONENTS + "/include",
+//        VOB_COMPONENTS + "/gki/ulinux",
+//        VOB_COMPONENTS + "/gki/common",
+//        "system/nfc/utils/include",
+//        "vendor/st/nfc/packages/apps/Nfc/nci/jni",
+//        "vendor/st/nfc/packages/apps/Nfc/st_dta/jni",
+//    ],
+
+    shared_libs: [
+        "libandroidicu",
+        "libnativehelper",
+        "libcutils",
+        "libutils",
+        "liblog",
+        "libstnfc-nci",
+        "libchrome",
+        "libbase",
+        "libdl",
+        "libnfc_st_dta_jni",
+    ],
+
+    static_libs: [	"libxml2",
+    				"libnfc_jni"],
+
+    proprietary: false,
+    owner: "st",
+    system_ext_specific: true,
+}
