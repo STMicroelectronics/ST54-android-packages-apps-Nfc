@@ -1,0 +1,53 @@
+genrule {
+    name: "statslog-st-Nfc-java-gen",
+    tools: ["stats-log-api-gen"],
+    cmd: "$(location stats-log-api-gen) --java $(out) --module nfc --javaPackage com.android.nfc"
+        + " --javaClass NfcStatsLog",
+    out: ["com/android/nfc/NfcStatsLog.java"],
+}
+
+
+//########################################
+//# ST Configuration
+//########################################
+android_app {
+    name: "Nfc_st",
+
+    srcs: ["src/**/*.java"] + ["st/**/*.java"] + ["st_dta/**/*.java"] + [
+        "nci/src/com/android/nfc/dhimpl/NativeLlcpConnectionlessSocket.java",
+        "nci/src/com/android/nfc/dhimpl/NativeLlcpServiceSocket.java",
+        "nci/src/com/android/nfc/dhimpl/NativeLlcpSocket.java",
+        "nci/src/com/android/nfc/dhimpl/NativeP2pDevice.java",
+        ":statslog-st-Nfc-java-gen",
+    ],
+
+    owner: "st",
+    overrides: [
+        "Nfc",
+        "NfcNci",
+    ],
+    platform_apis: true,
+    certificate: "platform",
+    system_ext_specific: true,
+
+    jni_libs: [
+        "libstnfc_nci_jni",
+        "libnfc_st_dta_jni",
+    ],
+
+    libs: [
+        "com.st.android.nfc_extensions",
+    ],
+
+	uses_libs: [
+		"com.st.android.nfc_extensions"
+	],
+
+    static_libs: ["androidx.appcompat_appcompat",
+                 ],
+
+    optimize: {
+        enabled: false,
+    },
+
+}
