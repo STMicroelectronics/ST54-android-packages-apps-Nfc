@@ -4717,6 +4717,55 @@ void NfcStExtensions::StActionNtfEnable(bool enable) {
 
 /*******************************************************************************
  **
+ ** Function:        StIntfActivatedNtfEnable
+ **
+ ** Description:    Enable / disable collection of RF_INTF_ACTIVATED_NTF
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void NfcStExtensions::StIntfActivatedNtfEnable(bool enable) {
+  static const char fn[] = "StIntfActivatedNtfEnable";
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+
+  {
+    SyncEventGuard guard(mVsLogDataEvent);
+    mSendIntfActivatedNtfToUpper = enable;
+  }
+
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+}
+
+void NfcStExtensions::notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata) {
+  static const char fn[] = "NfcStExtensions::notifyIntfActivatedEvent";
+  bool sendToUpper = false;
+  {
+    SyncEventGuard guard(mVsLogDataEvent);
+    sendToUpper = mSendIntfActivatedNtfToUpper;
+  }
+
+  if (sendToUpper) {
+    // We need to send this data to the service
+    JNIEnv* e = NULL;
+    ScopedAttach attach(mNativeData->vm, &e);
+    LOG_IF(INFO, nfc_debug_enabled)
+        << fn
+        << StringPrintf(": send %db: %02x%02x...", len, pdata[0], pdata[1]);
+    if (e == NULL) {
+      LOG(ERROR) << StringPrintf("jni env is null");
+      return;
+    }
+    ScopedLocalRef<jbyteArray> ntfData(e, e->NewByteArray(len));
+    e->SetByteArrayRegion(ntfData.get(), 0, len, (jbyte*)(pdata));
+
+    e->CallVoidMethod(mNativeData->manager,
+                      android::gCachedNfcManagerNotifyIntfActivatedNtf,
+                      ntfData.get());
+  }
+}
+
+/*******************************************************************************
+ **
  ** Function:        notifyRfFieldEvent
  **
  ** Description:    receive information when FIELD ON  or OFF ntf
@@ -4956,6 +5005,25 @@ bool NfcStExtensions::sendRawRfCmd(int cmdId, bool enable) {
       } else if ((cmdId == PROP_CTRL_RF_RAW_MODE_CMD) &&
                  (nfaStat == NFA_STATUS_OK)) {
         mIsExtRawMode = enable;
+
+        // wait 40ms before change PROP_POLL_TX_TICK_INTERVAL
+        if (enable) usleep(40000);
+
+        // WA to improve stability of RAW mode.
+        {
+          SyncEventGuard guard(mNfaConfigEvent);
+          uint8_t param[1] = {0x00};
+
+          if (enable) param[0] = 0x1E;  // 30ms to be fine tuned
+
+          nfaStat = NFA_SetConfig(NCI_PARAM_ID_PROP_POLL_TX_TICK_INTERVAL,
+                                  sizeof(param), &param[0]);
+          if (nfaStat == NFA_STATUS_OK) {
+            mNfaConfigEvent.wait();
+          }
+        }
+        // wait 40ms before restart disco
+        if (enable) usleep(40000);
       }
     }
 

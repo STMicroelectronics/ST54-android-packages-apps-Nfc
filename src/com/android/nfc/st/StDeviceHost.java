@@ -64,4 +64,6 @@ public interface StDeviceHost extends DeviceHost {
     boolean setForceSAK(boolean enabled, int sak);
 
     boolean isMultiTag();
+
+    void enableIntfActivatedNtf(boolean enabled);
 }

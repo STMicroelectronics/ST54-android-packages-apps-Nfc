@@ -549,4 +549,10 @@ public class StNativeNfcManager implements StDeviceHost {
     private void notifyRawAuthStatus(boolean status) {
         mListener.onRawAuthReceived(status);
     }
+
+    public native void enableIntfActivatedNtf(boolean enabled);
+
+    private void notifyIntfActivatedNtf(byte[] data) {
+        mListener.onIntfActivatedNtfReceived(data);
+    }
 }

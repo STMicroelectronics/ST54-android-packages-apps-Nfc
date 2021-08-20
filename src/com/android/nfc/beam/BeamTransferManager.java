@@ -414,21 +414,11 @@ public class BeamTransferManager
         // Check the amount of files we received in this transfer;
         // If more than one, create a separate directory for it.
         String extRoot = Environment.getExternalStorageDirectory().getPath();
-        File beamPath = new File(extRoot + "/" + BEAM_DIR);
 
-        if (!checkMediaStorage(beamPath) || mUris.size() == 0) {
-            Log.e(TAG, "Media storage not valid or no uris received.");
+        if (mUris.size() == 0) {
+            Log.e(TAG, "No uris received.");
             updateStateAndNotification(STATE_FAILED);
             return;
-        }
-
-        if (mUris.size() > 1) {
-            beamPath = generateMultiplePath(extRoot + "/" + BEAM_DIR + "/");
-            if (!beamPath.isDirectory() && !beamPath.mkdir()) {
-                Log.e(TAG, "Failed to create multiple path " + beamPath.toString());
-                updateStateAndNotification(STATE_FAILED);
-                return;
-            }
         }
 
         for (int i = 0; i < mUris.size(); i++) {
@@ -446,18 +436,8 @@ public class BeamTransferManager
 
             if (DBG) Log.d(TAG, "Bluetooth source file: " + srcFile.toString());
 
-            File dstFile =
-                    generateUniqueDestination(beamPath.getAbsolutePath(), uri.getLastPathSegment());
-            Log.d(TAG, "Renaming from " + srcFile);
-            if (!srcFile.renameTo(dstFile)) {
-                if (DBG) Log.d(TAG, "Failed to rename from " + srcFile + " to " + dstFile);
-                srcFile.delete();
-                return;
-            } else {
-                mPaths.add(dstFile.getAbsolutePath());
-                mMimeTypes.put(dstFile.getAbsolutePath(), mimeType);
-                if (DBG) Log.d(TAG, "Did successful rename from " + srcFile + " to " + dstFile);
-            }
+            mPaths.add(srcFile.getAbsolutePath());
+            mMimeTypes.put(srcFile.getAbsolutePath(), mimeType);
         }
 
         // We can either add files to the media provider, or provide an ACTION_VIEW

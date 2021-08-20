@@ -162,10 +162,12 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.Scanner;
 import java.util.Set;
 import com.android.nfc.st.NfcAddonWrapper;
+import com.st.android.nfc_extensions.IIntfActivatedNtfCallback;
 import com.st.android.nfc_extensions.INfcSettingsAdapter;
 import com.st.android.nfc_extensions.INfcSettingsCallback;
 import com.st.android.nfc_extensions.NfcSettingsAdapter;
@@ -601,6 +603,12 @@ public class NfcService implements DeviceHostListener {
         }
     }
 
+    public void onIntfActivatedNtfReceived(byte[] data) {
+        if (mNfcWalletAdapter != null) {
+            mNfcWalletAdapter.onIntfActivatedNtfReceived(data);
+        }
+    }
+
     public void onRawAuthReceived(boolean status) {
         if (mNfcWalletAdapter != null) {
             mNfcWalletAdapter.onRawAuthCb(status);
@@ -667,6 +675,26 @@ public class NfcService implements DeviceHostListener {
             if (DBG2) Log.d(TAG, "onEeUpdated()");
 
             sendMessage(NfcService.MSG_UPDATE_ROUTING_TABLE, null);
+
+            boolean gotLock = mInCardSwitchLock.tryAcquire();
+
+            if (mInCardSwitchCnt > 0) {
+                mInCardSwitchCnt--;
+
+                if ((mInCardSwitchOn == false) && (mInCardSwitchCnt == 0)) {
+                    boolean rslt = mInCardSwitchTask.cancel(false);
+                    // If task has been stopped before scheduled
+                    if (rslt) {
+                        mInCardSwitchTask =
+                                mInCardSwitchScheduler.schedule(
+                                        mInCardSwitchWaitTask, 0, TimeUnit.MILLISECONDS);
+                    }
+                }
+            }
+
+            if (gotLock) {
+                mInCardSwitchLock.release();
+            }
         } else {
             if (DBG2) Log.d(TAG, "onEeUpdated() - mState is STATE_TURNING_ON, skipping");
         }
@@ -3562,11 +3590,37 @@ public class NfcService implements DeviceHostListener {
         }
     }
 
+    boolean mInCardSwitchOn = false;
+    int mInCardSwitchCnt = 0;
+    private final ScheduledExecutorService mInCardSwitchScheduler =
+            Executors.newScheduledThreadPool(1);
+    private ScheduledFuture<?> mInCardSwitchTask = null;
+    Semaphore mInCardSwitchLock = new Semaphore(1);
+    final InCardSwitchRunnable mInCardSwitchWaitTask = new InCardSwitchRunnable();
+
+    class InCardSwitchRunnable implements Runnable {
+        @Override
+        public void run() {
+            // default RF dynamic parameters
+            mNfcWalletAdapter.rotateRfParameters(true);
+
+            // release SWP, parameters update should have started.
+            if (mNfcWalletAdapter.mSwpEnabledByCardSwitch) {
+                mNfcWalletAdapter.mSwpEnabledByCardSwitch = false;
+                mNfcWalletAdapter.keepEseSwpActive(false);
+            }
+            mInCardSwitchCnt = 0;
+            mDeviceHost.doSetMuteTech(muteARequested, muteBRequested, muteFRequested, false);
+            mInCardSwitchLock.release();
+        }
+    }
+
     final class NfcWalletAdapterService extends INfcWalletAdapter.Stub {
         private int mHandle;
-        private boolean mSwpEnabledByCardSwitch;
+        public boolean mSwpEnabledByCardSwitch;
         private INfcWalletLogCallback mLogCallback;
         private INfceeActionNtfCallback mActionNtfCallback;
+        private IIntfActivatedNtfCallback mIntfActivatedNtfCallback;
         private INfcWalletRawCallback mRawCallback;
         private int mRawDuration;
 
@@ -3720,6 +3774,41 @@ public class NfcService implements DeviceHostListener {
             return true;
         }
 
+        public boolean registerIntfActivatedNtfCallback(IIntfActivatedNtfCallback cb) {
+            if (isNfcEnabled() == false) {
+                Log.e(TAG, "NFC is not enabled, ignore");
+                return false;
+            }
+            synchronized (NfcWalletAdapterService.this) {
+                mIntfActivatedNtfCallback = cb;
+                mDeviceHost.enableIntfActivatedNtf(true);
+            }
+            return true;
+        }
+
+        public void onIntfActivatedNtfReceived(byte[] data) {
+            Log.d(TAG, "onIntfActivatedNtfReceived");
+            synchronized (NfcWalletAdapterService.this) {
+                if (mIntfActivatedNtfCallback != null) {
+                    try {
+                        mIntfActivatedNtfCallback.onIntfActivatedNtfReceived(data);
+                    } catch (RemoteException e) {
+                        // Ignore
+                    }
+                }
+            }
+        }
+
+        public boolean unregisterIntfActivatedNtfCallback() {
+            synchronized (NfcWalletAdapterService.this) {
+                if (isNfcEnabled()) {
+                    mDeviceHost.enableIntfActivatedNtf(false);
+                }
+                mIntfActivatedNtfCallback = null;
+            }
+            return true;
+        }
+
         public boolean setForceSAK(boolean enabled, int sak) {
             boolean status = false;
             if (isNfcEnabled() == false) {
@@ -3732,6 +3821,10 @@ public class NfcService implements DeviceHostListener {
         }
 
         public boolean seteSEInCardSwitching(boolean inswitching) {
+            return seteSEInCardSwitchingExt(inswitching, 0);
+        }
+
+        public boolean seteSEInCardSwitchingExt(boolean inswitching, int nbOp) {
             boolean status = false;
 
             if (isNfcEnabled() == false) {
@@ -3739,30 +3832,49 @@ public class NfcService implements DeviceHostListener {
                 return false;
             }
 
-            Log.d(TAG, "seteSEInCardSwitching() - inswitching: " + inswitching);
+            Log.d(
+                    TAG,
+                    "seteSEInCardSwitching() - inswitching: "
+                            + inswitching
+                            + ", nbOp: "
+                            + nbOp
+                            + ", mInCardSwitchOn: "
+                            + mInCardSwitchOn
+                            + ", mInCardSwitchCnt: "
+                            + mInCardSwitchCnt);
 
             synchronized (NfcWalletAdapterService.this) {
+                if (inswitching == mInCardSwitchOn) {
+                    Log.e(TAG, "seteSEInCardSwitching() - already same status");
+                    return false;
+                }
                 if (inswitching) {
+                    mInCardSwitchLock.acquireUninterruptibly();
+                    mInCardSwitchOn = inswitching;
+                    mInCardSwitchCnt = 2 * nbOp;
+
                     // stop discovery
                     status = mDeviceHost.doSetMuteTech(true, true, true, false);
                     if (mHandle == 0) {
                         keepEseSwpActive(true);
                         mSwpEnabledByCardSwitch = true;
                     }
+                    mInCardSwitchLock.release();
                 } else {
-                    // default RF dynamic parameters
-                    rotateRfParameters(true);
-
-                    // release SWP, parameters update should have started.
-                    if (mSwpEnabledByCardSwitch) {
-                        mSwpEnabledByCardSwitch = false;
-                        keepEseSwpActive(false);
+                    // restore polling
+                    int waitTime = 0;
+                    if (mInCardSwitchCnt != 0) {
+                        // wait for up to that time the expected CLF notifications
+                        waitTime = 350;
                     }
 
-                    // restore polling
-                    status =
-                            mDeviceHost.doSetMuteTech(
-                                    muteARequested, muteBRequested, muteFRequested, false);
+                    mInCardSwitchLock.acquireUninterruptibly();
+                    mInCardSwitchOn = inswitching;
+                    // Launch Thread to wait 0ms/250ms or all RF_NFCEE_DISCOVERY_REQ_NTF rx
+                    mInCardSwitchTask =
+                            mInCardSwitchScheduler.schedule(
+                                    mInCardSwitchWaitTask, waitTime, TimeUnit.MILLISECONDS);
+                    status = true;
                 }
             }
 
@@ -3936,45 +4048,6 @@ public class NfcService implements DeviceHostListener {
                             mRawLogicalChannelNbr = rsp[0];
                         }
 
-                        // send command SELECT ISD on this logical channel
-                        byte[] selectCommand =
-                                new byte[] {
-                                    mRawLogicalChannelNbr,
-                                    (byte) 0xA4,
-                                    (byte) 0x04,
-                                    (byte) 0x00,
-                                    (byte) 0x08,
-                                    (byte) 0xA0,
-                                    (byte) 0x00,
-                                    (byte) 0x00,
-                                    (byte) 0x01,
-                                    (byte) 0x51,
-                                    (byte) 0x00,
-                                    (byte) 0x00,
-                                    (byte) 0x00
-                                };
-                        rsp = doTransceive(mRawSEHandle, selectCommand);
-                        if ((rsp.length <= 2)
-                                || (!(rsp[rsp.length - 2] == (byte) 0x90
-                                        && rsp[rsp.length - 1] == (byte) 0x00))) {
-                            Log.d(TAG, "internal Select ISD ERROR 9000");
-                            // close channel
-                            if (mUseLogicalChannel) {
-                                doTransceive(
-                                        mRawSEHandle,
-                                        new byte[] {
-                                            mRawLogicalChannelNbr,
-                                            0x70,
-                                            (byte) 0x80,
-                                            mRawLogicalChannelNbr
-                                        });
-                            }
-                            // close APDU gate
-                            doDisconnect(mRawSEHandle);
-                            mRawSEHandle = -1;
-                            return false;
-                        }
-
                         // call rawRfAuth(true);
                         if (!mStExtensions.rawRfAuth(true)) {
                             Log.d(TAG, "Raw mode AUTH command failed");
@@ -4097,10 +4170,35 @@ public class NfcService implements DeviceHostListener {
         /* Exchange data with the eSE. First command shall be SELECT ISD. */
         public byte[] rawSeAuth(byte[] data) {
             byte[] ret;
+            byte[] selectIsdCommand =
+                    new byte[] {
+                        (byte) 0x00,
+                        (byte) 0xA4,
+                        (byte) 0x04,
+                        (byte) 0x00,
+                        (byte) 0x08,
+                        (byte) 0xA0,
+                        (byte) 0x00,
+                        (byte) 0x00,
+                        (byte) 0x01,
+                        (byte) 0x51,
+                        (byte) 0x00,
+                        (byte) 0x00,
+                        (byte) 0x00
+                    };
+
             Log.d(TAG, "rawSeAuth");
             synchronized (NfcWalletAdapterService.this) {
                 if (mRawSEHandle <= 0) {
                     Log.e(TAG, "rawSeAuth called at wrong time");
+                    return null;
+                }
+                if ((!Arrays.equals(
+                                Arrays.copyOfRange(data, 1, 4 + data[4]),
+                                Arrays.copyOfRange(selectIsdCommand, 1, 4 + selectIsdCommand[4])))
+                        && (data[1] == (byte) 0xA4)) {
+                    Log.e(TAG, "rawSeAuth Invalid SELECT in rawSeAuth");
+                    Log.e(TAG, "data:" + toHexString(data, 0, data.length));
                     return null;
                 }
                 data[0] |= mRawLogicalChannelNbr;
@@ -5220,9 +5318,9 @@ public class NfcService implements DeviceHostListener {
                 break;
         }
 
-        if (mIsHceCapable && mReaderModeParams == null) {
-            // Host routing is always enabled at lock screen or later, provided
-            // we aren't in reader mode
+        if (mIsHceCapable) {
+            // Host routing is always enabled at lock screen or later,
+            // even in reader mode where listen is deactivated anyway
             if ((mModeBitmapSave & 0x02) == 0x2) { // HCE
                 paramsBuilder.setEnableHostRouting(true);
             }
@@ -6703,6 +6801,9 @@ public class NfcService implements DeviceHostListener {
                 mSEService =
                         ISecureElementService.Stub.asInterface(
                                 ServiceManager.getService(Context.SECURE_ELEMENT_SERVICE));
+                if (mSEService == null) {
+                    return null;
+                }
             }
             String[] readers = null;
             try {

@@ -36,6 +36,7 @@ import android.graphics.Matrix;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
+import android.hardware.display.DisplayManager;
 import android.os.AsyncTask;
 import android.os.Binder;
 import android.util.DisplayMetrics;
@@ -205,13 +206,26 @@ public class SendUi
 
         mDisplayMetrics = new DisplayMetrics();
         mDisplayMatrix = new Matrix();
-        mWindowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+
+        final DisplayManager dm = context.getSystemService(DisplayManager.class);
+        final Display primaryDisplay = dm.getDisplay(Display.DEFAULT_DISPLAY);
+        final Context windowContext =
+                context.createDisplayContext(primaryDisplay)
+                        .createWindowContext(
+                                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null);
+
+        // mWindowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        mWindowManager = (WindowManager) windowContext.getSystemService(Context.WINDOW_SERVICE);
+
         mStatusBarManager = (StatusBarManager) context.getSystemService(Context.STATUS_BAR_SERVICE);
 
         mDisplay = mWindowManager.getDefaultDisplay();
 
+        // mLayoutInflater =
+        //         (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
         mLayoutInflater =
-                (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+                (LayoutInflater) windowContext.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
+
         mScreenshotLayout = mLayoutInflater.inflate(R.layout.screenshot, null);
 
         mScreenshotView = (ImageView) mScreenshotLayout.findViewById(R.id.screenshot);
@@ -311,7 +325,8 @@ public class SendUi
         // Create a Window with a Decor view; creating a window allows us to get callbacks
         // on key events (which require a decor view to be dispatched).
         mContext.setTheme(android.R.style.Theme_Black_NoTitleBar_Fullscreen);
-        Window window = new PhoneWindow(mContext);
+        // Window window = new PhoneWindow(mContext);
+        Window window = new PhoneWindow(windowContext);
         window.setCallback(this);
         window.requestFeature(Window.FEATURE_NO_TITLE);
         mDecor = window.getDecorView();
@@ -595,9 +610,15 @@ public class SendUi
 
     /** Returns a screenshot of the current display contents. */
     Bitmap createScreenshot() {
-        boolean hasNavBar =
-                mContext.getResources()
-                        .getBoolean(com.android.internal.R.bool.config_showNavigationBar);
+
+        // Temporary patch for Android 12.. Start
+
+        //       boolean hasNavBar =
+        //               mContext.getResources()
+        //                      .getBoolean(com.android.internal.R.bool.config_showNavigationBar);
+        boolean hasNavBar = true;
+
+        // ..End
         final int statusBarHeight =
                 mContext.getResources()
                         .getDimensionPixelSize(com.android.internal.R.dimen.status_bar_height);

@@ -780,6 +780,18 @@ class NfcStExtensions {
   bool sendRawRfCmd(int cmdId, bool enable);
   bool getExtRawMode();
 
+  /*******************************************************************************
+  **
+  ** Function:        notifyIntfActivatedEvent
+  **
+  ** Description:     Called when RF_INTF_ACTIVATED_NTF was received
+  **
+  ** Returns:         None
+  **
+  *******************************************************************************/
+  void StIntfActivatedNtfEnable(bool enable);
+  void notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata);
+
  private:
   static const uint8_t OID_ST_VS_CMD = 0x2;
   static const uint8_t OID_ST_TEST_CMD = 0x3;
@@ -895,6 +907,7 @@ class NfcStExtensions {
   SyncEvent mVsLogDataEvent;
   bool mSendVsLogDataToUpper;
   bool mSendNfceeActionNtfToUpper;
+  bool mSendIntfActivatedNtfToUpper;
 
   static int sRfDynParamSet;
 

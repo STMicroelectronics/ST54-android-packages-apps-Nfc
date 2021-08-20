@@ -134,6 +134,7 @@ jmethodID gCachedNfcManagerNotifyESEUnrecoverable;
 jmethodID gCachedNfcManagerNotifyDetectionFOD;
 jmethodID gCachedNfcManagerNotifyStLogData;
 jmethodID gCachedNfcManagerNotifyActionNtf;
+jmethodID gCachedNfcManagerNotifyIntfActivatedNtf;
 jmethodID gCachedNfcManagerNotifyRawAuthStatus;
 
 const char* gNativeP2pDeviceClassName =
@@ -1339,6 +1340,9 @@ static jboolean stNfcManager_initNativeStruc(JNIEnv* e, jobject o) {
   gCachedNfcManagerNotifyActionNtf =
       e->GetMethodID(cls.get(), "notifyActionNtf", "(I[B)V");
 
+  gCachedNfcManagerNotifyIntfActivatedNtf =
+      e->GetMethodID(cls.get(), "notifyIntfActivatedNtf", "([B)V");
+
   gCachedNfcManagerNotifyRawAuthStatus =
       e->GetMethodID(cls.get(), "notifyRawAuthStatus", "(Z)V");
 
@@ -1553,6 +1557,14 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
       SyncEventGuard guard(sNfaSetPowerSubState);
       sNfaSetPowerSubState.notifyOne();
     } break;
+
+    case NFA_DM_INTF_ACTIVATED_EVT: {
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: NFA_DM_INTF_ACTIVATED_EVT;", __func__);
+      NfcStExtensions::getInstance().notifyIntfActivatedEvent(
+          eventData->intf_activated.len, eventData->intf_activated.pdata);
+    } break;
+
     default:
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s: unhandled event", __func__);
@@ -2637,6 +2649,27 @@ static void nfcManager_enableActionNtf(JNIEnv* e, jobject o, jboolean enabled) {
 
 /*******************************************************************************
 **
+** Function:        nfcManager_enableIntfActivatedNtf
+**
+** Description:     Enable or disable the collection of RF_INTF_ACTIVATED_NTFs
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         None.
+**
+*******************************************************************************/
+static void nfcManager_enableIntfActivatedNtf(JNIEnv* e, jobject o,
+                                              jboolean enabled) {
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("Enter :%s  e:%d", __func__, enabled);
+
+  NfcStExtensions::getInstance().StIntfActivatedNtfEnable(enabled);
+
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", __func__);
+}
+
+/*******************************************************************************
+**
 ** Function:        stNfcManager_GetMuteTechMask
 **
 ** Description:     return current mask for StSecureElement.cpp
@@ -3475,9 +3508,10 @@ static JNINativeMethod gMethods[] = {
     {"setForceSAK", "(ZI)Z", (void*)nfcManager_setForceSAK},
     {"getNfaStorageDir", "()Ljava/lang/String;",
      (void*)nfcManager_doGetNfaStorageDir},
-
     {"doSetNfceePowerAndLinkCtrl", "(Z)V",
      (void*)stNfcManager_doSetNfceePowerAndLinkCtrl},
+    {"enableIntfActivatedNtf", "(Z)V",
+     (void*)nfcManager_enableIntfActivatedNtf},
 };
 
 /*******************************************************************************

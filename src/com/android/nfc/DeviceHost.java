@@ -105,6 +105,8 @@ public interface DeviceHost {
         public void onActionNtfReceived(int nfcee, byte[] data);
 
         public void onRawAuthReceived(boolean status);
+
+        public void onIntfActivatedNtfReceived(byte[] data);
     }
 
     public interface TagEndpoint {

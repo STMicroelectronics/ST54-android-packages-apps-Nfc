@@ -36,6 +36,8 @@
 #define PROP_AUTH_RF_RAW_MODE_CMD 0x17
 // PROP_AUTH_RF_RAW_MODE_CMD
 #define PROP_CTRL_RF_RAW_MODE_CMD 0x13
+// POLL_TX_TICK_INTERVAL
+#define NCI_PARAM_ID_PROP_POLL_TX_TICK_INTERVAL 0xA6
 
 namespace android {
 extern const char* gStNativeNfcManagerClassName;
@@ -52,6 +54,7 @@ extern jmethodID gCachedNfcManagerNotifyESEUnrecoverable;
 /* Proprietary logging feature */
 extern jmethodID gCachedNfcManagerNotifyStLogData;
 extern jmethodID gCachedNfcManagerNotifyActionNtf;
+extern jmethodID gCachedNfcManagerNotifyIntfActivatedNtf;
 extern jmethodID gCachedNfcManagerNotifyRawAuthStatus;
 extern jmethodID gCachedNfcManagerNotifyDetectionFOD;
 }  // namespace android
