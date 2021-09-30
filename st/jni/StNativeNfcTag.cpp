@@ -299,6 +299,10 @@ static void ndefHandlerCallback(tNFA_NDEF_EVT event,
                           eventData->ndef_data.len);
       sReadDataLen = eventData->ndef_data.len;
       sReadData = (uint8_t*)malloc(sReadDataLen);
+      if (sReadData == nullptr) {
+        LOG(ERROR) << StringPrintf("%s: Could not allocate memory", __func__);
+        break;
+      }
       memcpy(sReadData, eventData->ndef_data.p_data, eventData->ndef_data.len);
     } break;
 

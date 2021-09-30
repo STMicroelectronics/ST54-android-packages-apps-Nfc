@@ -202,11 +202,14 @@ public class SnepMessenger {
         }
 
         if (NfcService.sIsDtaMode) {
-            if (!mIsClient && (requestField == SnepMessage.RESPONSE_CONTINUE)
-                    || // added for TC_S_BIT_B1_01_X
-                    requestField == SnepMessage.RESPONSE_SUCCESS
-                    || requestField == SnepMessage.RESPONSE_NOT_FOUND) {
-                if (DBG) Log.d(TAG, "errorneous response received, disconnecting client");
+            if (!mIsClient
+                    && (requestField == SnepMessage.RESPONSE_CONTINUE
+                            || // added for TC_S_BIT_B1_01_X
+                            requestField == SnepMessage.RESPONSE_SUCCESS
+                            || requestField == SnepMessage.RESPONSE_NOT_FOUND)) {
+                /* NFC Forum: fix issue of bad parenthesis for TC_C_GET_BV_01 (continuation
+                 * not done as requestSize equals readSize) and avoid side effects for TC_C_BIT_BI_01 */
+                if (DBG) Log.d(TAG, "erroneous response received, disconnecting client");
                 close();
             }
             if (!mIsClient && requestField == SnepMessage.REQUEST_RFU) {

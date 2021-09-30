@@ -113,7 +113,7 @@ bool gFieldNtfsStatus = false;
 
 bool gP2pBailOutMode = false;
 int recovery_option = 0;
-int nfcee_power_and_link_conf = 0;
+int nfcee_power_and_link_conf = 0x03;
 
 namespace android {
 jmethodID gCachedNfcManagerNotifyNdefMessageListeners;
@@ -289,7 +289,7 @@ void initializeRecoveryOption() {
 
 void initializeNfceePowerAndLinkConf() {
   nfcee_power_and_link_conf =
-      NfcConfig::getUnsigned(NAME_ALWAYS_ON_SET_EE_POWER_AND_LINK_CONF, 0);
+      NfcConfig::getUnsigned(NAME_ALWAYS_ON_SET_EE_POWER_AND_LINK_CONF, 0x03);
 
   DLOG_IF(INFO, nfc_debug_enabled)
       << __func__ << ": Always on set NFCEE_POWER_AND_LINK_CONF="
@@ -1847,10 +1847,6 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
           configData = 0x01; /* Poll NFC-DEP : Highest Available Bit Rates */
           NFA_SetConfig(NCI_PARAM_ID_BITR_NFC_DEP, sizeof(uint8_t),
                         &configData);
-          configData = 0x0B; /* Listen NFC-DEP : Waiting Time */
-          NFA_SetConfig(NFC_PMID_WT, sizeof(uint8_t), &configData);
-          configData = 0x0F; /* Specific Parameters for NFC-DEP RF Interface */
-          NFA_SetConfig(NCI_PARAM_ID_NFC_DEP_OP, sizeof(uint8_t), &configData);
         }
 
         struct nfc_jni_native_data* nat = getNative(e, o);
@@ -2181,6 +2177,12 @@ static jobject stNfcManager_doCreateLlcpServiceSocket(JNIEnv* e, jobject,
                                                       jint linearBufferLength) {
   PeerToPeer::tJNI_HANDLE jniHandle =
       PeerToPeer::getInstance().getNewJniHandle();
+
+  if (sn == NULL) {
+    LOG(ERROR) << StringPrintf("%s: Llcp socket Service Name is NULL",
+                               __func__);
+    return NULL;
+  }
 
   ScopedUtfChars serviceName(e, sn);
 
@@ -2575,7 +2577,7 @@ static jboolean nfcManager_setForceSAK(JNIEnv* e, jobject o, jboolean enabled,
   uint8_t num =
       StSecureElement::getInstance().retrieveHostList(nfceeid, conInfo);
   for (i = 0; i < num; i++) {
-    if (((nfceeid[i] & 0x82) == 0x82)) {
+    if (((nfceeid[i] & 0x83) == 0x82)) {
       force_sak[0] = nfceeid[i];  // 82 or 86
       break;
     }

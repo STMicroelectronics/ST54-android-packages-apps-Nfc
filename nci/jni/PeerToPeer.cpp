@@ -534,6 +534,11 @@ bool PeerToPeer::createClient(tJNI_HANDLE jniHandle, uint16_t miu, uint8_t rw) {
     return (false);
   }
 
+  if (i == sMax) {
+    LOG(ERROR) << StringPrintf("%s: fail", fn);
+    return (false);
+  }
+
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s: pClient: 0x%p  assigned for client jniHandle: %u",
                       fn, client.get(), jniHandle);
@@ -1663,7 +1668,7 @@ bool P2pServer::accept(PeerToPeer::tJNI_HANDLE serverJniHandle,
   tNFA_STATUS nfaStat = NFA_STATUS_OK;
 
   sp<NfaConn> connection = allocateConnection(connJniHandle);
-  if (connection == NULL) {
+  if (connection == nullptr) {
     LOG(ERROR) << StringPrintf("%s: failed to allocate new server connection",
                                fn);
     return false;

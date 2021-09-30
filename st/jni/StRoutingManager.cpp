@@ -420,19 +420,25 @@ bool StRoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen,
     }
   }
 
+  uint8_t connectedNfceeId =
+      StSecureElement::getInstance().getConnectedNfceeId(route);
+
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << fn << ": connectedNfceeId: " << connectedNfceeId;
+
   // Check if this is default AID route
   // Keep track of value
   if (aidLen == 0) {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s: resolved default AID route is 0x%02X", fn, route);
-    mResolvedDefaultAidRoute = route;
-    mConnectedDefaultAidRoute = route;
+    mResolvedDefaultAidRoute = connectedNfceeId;
+    mConnectedDefaultAidRoute = connectedNfceeId;
   }
 
   SyncEventGuard guard(mRoutingEvent);
   mAidRoutingConfigured = false;
-  tNFA_STATUS nfaStat =
-      NFA_EeAddAidRouting(route, aidLen, (uint8_t*)aid, powerState, aidInfo);
+  tNFA_STATUS nfaStat = NFA_EeAddAidRouting(connectedNfceeId, aidLen,
+                                            (uint8_t*)aid, powerState, aidInfo);
   if (nfaStat == NFA_STATUS_OK) {
     mRoutingEvent.wait();
   }
@@ -2097,7 +2103,6 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
           << StringPrintf("%s: NFA_EE_PWR_AND_LINK_CTRL_EVT", fn);
       SyncEventGuard guard(routingManager.mEePwrAndLinkCtrlEvent);
       routingManager.mEePwrAndLinkCtrlEvent.notifyOne();
-      se.notifyPowerCtrlRsp();
     } break;
 
     case NFA_EE_FORCE_ROUTING_EVT: {

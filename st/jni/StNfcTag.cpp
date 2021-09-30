@@ -37,10 +37,12 @@ using android::base::StringPrintf;
 
 extern bool nfc_debug_enabled;
 
+static jobjectArray techActBytes1;
 int selectedId = 0;
 static jobjectArray techPollBytes2;
 IntervalTimer gSelectCompleteTimer;
 static void selectCompleteCallBack(union sigval);
+static void deleteglobaldata(JNIEnv* e);
 
 static int tagUid[NFC_KOVIO_MAX_LEN];
 static int tagUidLen = 0;
@@ -637,6 +639,28 @@ TheEnd:
 
 /*******************************************************************************
 **
+** Function:        deleteglobaldata
+**
+** Description:     Deletes the global data reference after notifying to service
+**                  e: JVM environment.
+**
+** Returns:         None
+**
+*******************************************************************************/
+static void deleteglobaldata(JNIEnv* e) {
+  static const char fn[] = "deleteglobaldata";
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter", fn);
+  if (techActBytes1 != NULL) {
+    e->DeleteGlobalRef(techActBytes1);
+  }
+  if (techPollBytes2 != NULL) {
+    e->DeleteGlobalRef(techPollBytes2);
+  }
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit", fn);
+}
+
+/*******************************************************************************
+**
 ** Function:        createNativeNfcTag
 **
 ** Description:     Create a brand new Java NativeNfcTag object;
@@ -705,6 +729,7 @@ void NfcTag::createNativeNfcTag(tNFA_ACTIVATED& activationData) {
       e->ExceptionClear();
       LOG(ERROR) << StringPrintf("%s: fail notify nfc service", fn);
     }
+    deleteglobaldata(e);
   } else {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s: Selecting next tag", fn);
@@ -951,6 +976,21 @@ void NfcTag::fillNativeNfcTagMembers4(JNIEnv* e, jclass tag_cls, jobject tag,
   ScopedLocalRef<jclass> byteArrayClass(e, e->GetObjectClass(actBytes.get()));
   ScopedLocalRef<jobjectArray> techActBytes(
       e, e->NewObjectArray(mNumTechList, byteArrayClass.get(), 0));
+  if (mTechListIndex == 0) {
+    techActBytes1 =
+        reinterpret_cast<jobjectArray>(e->NewGlobalRef(techActBytes.get()));
+  } else {
+    for (int j = 0; j < mTechListIndex; j++) {
+      ScopedLocalRef<jobject> obj1(e,
+                                   e->GetObjectArrayElement(techActBytes1, j));
+      e->SetObjectArrayElement(techActBytes.get(), j, obj1.get());
+    }
+  }
+  if (mNativeData == NULL) {
+    LOG(ERROR) << StringPrintf("%s: mNativeData is null", fn);
+    return;
+  }
+  mNativeData->vm->GetEnv((void**)&e, mNativeData->env_version);
   for (int i = mTechListIndex; i < mNumTechList; i++) {
     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: index=%d", fn, i);
     if (NFC_PROTOCOL_T1T == mTechLibNfcTypes[i] ||
@@ -1068,6 +1108,12 @@ void NfcTag::fillNativeNfcTagMembers4(JNIEnv* e, jclass tag_cls, jobject tag,
     }
     e->SetObjectArrayElement(techActBytes.get(), i, actBytes.get());
   }  // for: every technology in the array
+  if (techActBytes1 != NULL && mTechListIndex != 0) {
+    e->DeleteGlobalRef(techActBytes1);
+    techActBytes1 =
+        reinterpret_cast<jobjectArray>(e->NewGlobalRef(techActBytes.get()));
+  }
+  // for: every technology in the array
   jfieldID f = e->GetFieldID(tag_cls, "mTechActBytes", "[[B");
   e->SetObjectField(tag, f, techActBytes.get());
 }

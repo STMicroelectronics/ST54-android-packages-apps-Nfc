@@ -36,6 +36,9 @@ namespace android {
 const char* JNISTDTAVersion = "JNI ST DTA version 00.01";
 const char* gNativeNfcStDtaExtensionsClassName =
     "com/android/nfc/dhimpl/NativeNfcStDtaExtensions";
+
+jmethodID gCachedNativeNfcStDtaExtensionsNotifyListeners;
+
 #define DTAEXT static
 #define JNICALL
 
@@ -50,14 +53,31 @@ const char* gNativeNfcStDtaExtensionsClassName =
 ** Returns:         Handle of secure element.  values < 0 represent failure.
 **
 *******************************************************************************/
-DTAEXT jboolean JNICALL
-Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_initialize(JNIEnv* e,
-                                                               jobject) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-  jboolean result;
+DTAEXT jint JNICALL
+Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_initialize(
+    JNIEnv* e, jobject obj, jboolean nfc_service_state) {
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
 
-  result = NfcStDtaExtensions::getInstance().initialize();
-  return result;
+  nfc_jni_native_data* nat =
+      (nfc_jni_native_data*)malloc(sizeof(struct nfc_jni_native_data));
+  if (nat == NULL) {
+    LOG(ERROR) << StringPrintf("%s: fail allocate native data", __func__);
+    return JNI_FALSE;
+  }
+
+  memset(nat, 0, sizeof(*nat));
+  e->GetJavaVM(&(nat->vm));
+  nat->env_version = e->GetVersion();
+  nat->manager = e->NewGlobalRef(obj);
+
+  ScopedLocalRef<jclass> cls(e, e->GetObjectClass(obj));
+
+  /* Initialize native cached references */
+
+  gCachedNativeNfcStDtaExtensionsNotifyListeners =
+      e->GetMethodID(cls.get(), "notifyListeners", "(Ljava/lang/String;)V");
+
+  return NfcStDtaExtensions::getInstance().initialize(nat, nfc_service_state);
 }
 
 /*******************************************************************************
@@ -94,15 +114,13 @@ Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_deinitialize(JNIEnv* e,
 *******************************************************************************/
 DTAEXT jint JNICALL
 Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_enableDiscovery(
-    JNIEnv* e, jobject obj, jbyte con_poll, jbyte con_listen_dep,
-    jbyte con_listen_t4tp, jboolean con_listen_t3tp, jboolean con_listen_acm,
-    jbyte con_bitr_f, jbyte con_bitr_acm) {
+    JNIEnv* e, jobject obj, jboolean rf_mode, jint nb, jbyte con_bitr_f,
+    jint cr11_tagop_cfg) {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
   jint result = false;
 
   result = NfcStDtaExtensions::getInstance().enableDiscovery(
-      con_poll, con_listen_dep, con_listen_t4tp, con_listen_t3tp,
-      con_listen_acm, con_bitr_f, con_bitr_acm);
+      rf_mode, nb, con_bitr_f, cr11_tagop_cfg);
   return result;
 }
 
@@ -126,14 +144,6 @@ Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_disableDiscovery(JNIEnv* e,
 
   result = NfcStDtaExtensions::getInstance().disableDiscovery();
   return result;
-}
-
-DTAEXT void JNICALL
-Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setPatternNb(JNIEnv* e,
-                                                                 jobject obj,
-                                                                 jint nb) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-  NfcStDtaExtensions::getInstance().setPatternNb(nb);
 }
 
 DTAEXT void JNICALL
@@ -167,9 +177,17 @@ Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setT4atNfcdepPrio(
 
 DTAEXT void JNICALL
 Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setFsdFscExtension(
-    JNIEnv* e, jobject obj, jboolean ext) {
+    JNIEnv* e, jobject obj, jint ext) {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
   NfcStDtaExtensions::getInstance().setFsdFscExtension(ext);
+}
+
+DTAEXT void JNICALL
+Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setNfcDepWT(JNIEnv* e,
+                                                                jobject obj,
+                                                                jbyte wt) {
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
+  NfcStDtaExtensions::getInstance().setNfcDepWT(wt);
 }
 
 DTAEXT void JNICALL
@@ -179,27 +197,16 @@ Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setLlcpMode(
   NfcStDtaExtensions::getInstance().setLlcpMode(miux_mode);
 }
 
-DTAEXT void JNICALL
-Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setSnepMode(
-    JNIEnv* e, jobject obj, jbyte role, jbyte server_type, jbyte request_type,
-    jbyte data_type, jboolean disc_incorrect_len) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-  NfcStDtaExtensions::getInstance().setSnepMode(role, server_type, request_type,
-                                                data_type, disc_incorrect_len);
-}
-
 /*****************************************************************************
 **
 ** Description:     JNI functions
 **
 *****************************************************************************/
 static JNINativeMethod gMethods[] = {
-    {"initialize", "()Z",
+    {"initialize", "(Z)I",
      (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_initialize},
     {"deinitialize", "()Z",
      (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_deinitialize},
-    {"setPatternNb", "(I)V",
-     (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setPatternNb},
     {"setCrVersion", "(B)V",
      (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setCrVersion},
     {"setConnectionDevicesLimit", "(BBBB)V",
@@ -211,10 +218,12 @@ static JNINativeMethod gMethods[] = {
     {"setT4atNfcdepPrio", "(B)V",
      (void*)
          Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setT4atNfcdepPrio},
-    {"setFsdFscExtension", "(Z)V",
+    {"setFsdFscExtension", "(I)V",
      (void*)
          Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setFsdFscExtension},
-    {"enableDiscovery", "(BBBZZBB)I",
+    {"setNfcDepWT", "(B)V",
+     (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setNfcDepWT},
+    {"enableDiscovery", "(ZIBI)I",
      (void*)
          Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_enableDiscovery},
     {"disableDiscovery", "()Z",
@@ -222,9 +231,6 @@ static JNINativeMethod gMethods[] = {
          Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_disableDiscovery},
     {"setLlcpMode", "(I)V",
      (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setLlcpMode},
-    {"setSnepMode", "(BBBBZ)V",
-     (void*)Java_com_st_nfc_dta_mobile_NativeNfcStDtaExtensions_setSnepMode},
-
 };
 
 /*******************************************************************************

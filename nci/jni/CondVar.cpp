@@ -44,6 +44,7 @@ CondVar::CondVar() {
   pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
   memset(&mCondition, 0, sizeof(mCondition));
   int const res = pthread_cond_init(&mCondition, &attr);
+  pthread_condattr_destroy(&attr);
   if (res) {
     LOG(ERROR) << StringPrintf("CondVar::CondVar: fail init; error=0x%X", res);
   }

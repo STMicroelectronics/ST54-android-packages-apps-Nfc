@@ -6,6 +6,7 @@ cc_library_shared {
         "-Wextra",
         "-Wno-unused-parameter",
         "-Werror",
+        "-DTAG=\"StDtaJni\"",
     ] ,
 
     srcs: ["*.cpp"],
@@ -13,6 +14,14 @@ cc_library_shared {
     export_include_dirs :
     [
     ".",
+    ],
+
+    header_libs : [
+        "libstnfc_jni_headers",
+    ],
+
+    include_dirs: [
+        ".",
     ],
 
     shared_libs: [

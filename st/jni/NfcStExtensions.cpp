@@ -711,6 +711,11 @@ void NfcStExtensions::nfaVsCbActionRequest(uint8_t oid, uint16_t len,
       if (sStExtensions.mPropTestRspLen) {
         sStExtensions.mPropTestRspPtr =
             (uint8_t*)GKI_os_malloc(sStExtensions.mPropTestRspLen);
+        if (sStExtensions.mPropTestRspPtr == NULL) {
+          LOG(ERROR) << StringPrintf(
+              "%s: Could not allocate memory for mPropTestRspPtr", fn);
+          return;
+        }
         memcpy(sStExtensions.mPropTestRspPtr, &(p_msg[4]),
                sStExtensions.mPropTestRspLen);
       }
@@ -2445,7 +2450,11 @@ void NfcStExtensions::setProprietaryConfigSettings(int prop_config_id,
   }
 
   setPropConfig = (uint8_t*)GKI_os_malloc(mPropConfigLen + 6);
-
+  if (setPropConfig == NULL) {
+    LOG(ERROR) << StringPrintf(
+        "%s: Could not allocate memory for setPropConfig", fn);
+    return;
+  }
   setPropConfig[0] = 0x04;
   setPropConfig[1] = 0x00;
   setPropConfig[2] = prop_config_id;
@@ -2950,7 +2959,11 @@ void NfcStExtensions::sendPropSetConfig(int configSubSetId, int paramId,
   }
 
   setPropConfig = (uint8_t*)GKI_os_malloc(length + 6);
-
+  if (setPropConfig == NULL) {
+    LOG(ERROR) << StringPrintf(
+        "%s: Could not allocate memory for setPropConfig", fn);
+    return;
+  }
   setPropConfig[0] = 0x04;
   setPropConfig[1] = 0x00;
   setPropConfig[2] = configSubSetId;
@@ -3092,7 +3105,11 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
   mPropTestRspLen = 0;
 
   sendTestCmd = (uint8_t*)GKI_os_malloc(lengthTx + 1);
-
+  if (sendTestCmd == NULL) {
+    LOG(ERROR) << StringPrintf("%s: Could not allocate memory for sendTestCmd",
+                               fn);
+    return;
+  }
   sendTestCmd[0] = subCode;
 
   memcpy(sendTestCmd + 1, paramTx, lengthTx);
@@ -3100,9 +3117,9 @@ void NfcStExtensions::sendPropTestCmd(int OID, int subCode, uint8_t* paramTx,
   {
     if (subCode == 0xC9) {
       // mIsWaitingEvent.sendPropTestCmd = true;
-      uint8_t HwVersion = 0;
-      getHWVersion(&HwVersion);
-      if (HwVersion > 0x04) {  // command not supported by st21nfcd
+      uint8_t HwVersion[2] = {0, 0};
+      getHWVersion(HwVersion);
+      if (HwVersion[0] > 0x04) {  // command not supported by st21nfcd
 
         SyncEventGuard guard(mVsCallbackEvent);
 
@@ -4007,7 +4024,7 @@ void NfcStExtensions::StMonitorSeActivationWATriggered(NfcStExtensions* inst) {
   uint8_t num =
       StSecureElement::getInstance().retrieveHostList(nfceeid, conInfo);
   for (i = 0; i < num; i++) {
-    if (((nfceeid[i] & 0x82) == 0x82)) {
+    if (((nfceeid[i] & 0x83) == 0x82)) {
       resetSyncId[0] = nfceeid[i];  // 82 or 86
       break;
     }
@@ -4552,6 +4569,12 @@ void NfcStExtensions::StVsCallback(tNFC_VS_EVT event, uint16_t data_len,
       if (sStExtensions.mPropTestRspLen) {
         sStExtensions.mPropTestRspPtr =
             (uint8_t*)GKI_os_malloc(sStExtensions.mPropTestRspLen);
+        if (sStExtensions.mPropTestRspPtr == NULL) {
+          LOG(ERROR) << StringPrintf(
+              "%s: Could not allocate memory for sStExtensions.mPropTestRspPtr",
+              fn);
+          return;
+        }
         memcpy(sStExtensions.mPropTestRspPtr, &(p_data[4]),
                sStExtensions.mPropTestRspLen);
       }

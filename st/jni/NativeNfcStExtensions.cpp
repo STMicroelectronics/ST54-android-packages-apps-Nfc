@@ -201,9 +201,6 @@ static jbyteArray nativeNfcStExtensions_getSWVersion(JNIEnv *e, jobject) {
   void *handle = 0;
   int len = 0, res_len = 0;
   const char *separator = "+";
-
-  // char hal_path[PATH_MAX];
-  //    char hal_name[NAME_MAX];
   char lib_path[PATH_MAX];
   if (IS_64BIT) {
     // strcpy (hal_path,"/vendor/lib64/");
@@ -213,29 +210,7 @@ static jbyteArray nativeNfcStExtensions_getSWVersion(JNIEnv *e, jobject) {
     strlcpy(lib_path, "/system_ext/lib/", sizeof(lib_path));
   }
 
-  /* if (property_get("ro.product.board", hal_name, NULL) == 0)
-   {
-       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: ro.product.board
-   not defined, cannot find hal library", __func__);
-   }
-   else*/
-  //{
-
-  // strcat (hal_path,"hw/nfc_nci.st21nfc.default.so");
-  // DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: loading hal library
-  // %s", __func__, hal_path); handle = dlopen(hal_path, RTLD_LAZY); if
-  // (!handle) { LOG(ERROR) << StringPrintf("%s: failed to load the library",
-  // __func__); return NULL;
-  //}
-  //}
   char **temp;  // = (char**) dlsym(handle, "halVersion");
-
-  //    len = strlen(*temp);
-  //   char * hal_version = (char *) malloc(len+1);
-  //   memcpy(hal_version, *temp, (len+1));
-  //   dlclose(handle);
-  //   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: HAL version is %s",
-  //   __func__, hal_version); res_len += len;
 
   // Get Core stack version - idx 1
   strlcat(lib_path, "libstnfc-nci.so", sizeof(lib_path));
@@ -247,8 +222,19 @@ static jbyteArray nativeNfcStExtensions_getSWVersion(JNIEnv *e, jobject) {
   }
   temp = (char **)dlsym(handle, "coreStackVersion");
 
+  if (temp == nullptr) {
+    LOG(ERROR) << StringPrintf("%s: failed to find coreStackVersion", __func__);
+    return result;
+  }
+
   len = strlen(*temp);
   char *core_stack_version = (char *)malloc(len + 1);
+
+  if (core_stack_version == nullptr) {
+    LOG(ERROR) << StringPrintf("%s: coreStackVersion is null", __func__);
+    return result;
+  }
+
   memcpy(core_stack_version, *temp, (len + 1));
   dlclose(handle);
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
@@ -272,8 +258,22 @@ static jbyteArray nativeNfcStExtensions_getSWVersion(JNIEnv *e, jobject) {
   }
   temp = (char **)dlsym(handle, "androidVersion");
 
+  if (temp == nullptr) {
+    LOG(ERROR) << StringPrintf("%s: failed to find androidVersion", __func__);
+    free(core_stack_version);
+    return result;
+  }
+
   len = strlen(*temp);
   char *android_version = (char *)malloc(len + 1);
+
+  if (android_version == nullptr) {
+    LOG(ERROR) << StringPrintf("%s: android_version is null", __func__);
+    free(core_stack_version);
+    free(android_version);
+    return result;
+  }
+
   memcpy(android_version, *temp, (len + 1));
   dlclose(handle);
   DLOG_IF(INFO, nfc_debug_enabled)
@@ -683,6 +683,11 @@ static void nativeNfcStExtensions_getPipeInfo(JNIEnv *e, jobject, jint host_id,
   }
 
   uint8_t infoArray[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+
+  if (nb_pipes > 15) {
+    LOG(ERROR) << StringPrintf("%s: Nb of pipes >= 15", __func__);
+    return;
+  }
 
   for (i = 0; i < nb_pipes; i++) {
     if (NfcStExtensions::getInstance().mPipesInfo[host_idx].data[i].pipe_id ==

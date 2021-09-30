@@ -176,8 +176,6 @@ class StSecureElement {
 
   void notifyModeSet(tNFA_EE_MODE_SET modeSet);
   void notifyEeStatus(tNFA_HANDLE eeHandle, uint8_t status);
-  void notifyPowerCtrlRsp();
-  void handleNfceePowerAndLinkCtrl(bool alwaysOn);
 
   /*******************************************************************************
   **

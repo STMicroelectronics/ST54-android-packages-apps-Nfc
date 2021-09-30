@@ -259,8 +259,6 @@ public interface DeviceHost {
 
     public boolean routeAid(byte[] aid, int route, int aidInfo, int power);
 
-    public boolean setDefaultRoute(int defaultRouteEntry, int nonAidBasedRoute);
-
     public boolean unrouteAid(byte[] aid);
 
     public boolean clearAidTable();

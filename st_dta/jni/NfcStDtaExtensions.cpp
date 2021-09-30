@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include <dlfcn.h>
+
 #include "nfa_api.h"
 
 #include "NfcStDtaExtensions.h"
@@ -34,31 +35,32 @@
 using android::base::StringPrintf;
 extern bool nfc_debug_enabled;
 
+namespace android {
+extern jmethodID gCachedNativeNfcStDtaExtensionsNotifyListeners;
+}
+
+std::string dtaLibState[] = {
+    "UNKNOWN",
+    "INITIALIZED",
+    "UNINITIALIZED",
+};
+
 /*****************************************************************************
  **
  ** public variables
  **
  *****************************************************************************/
 
-typedef struct tagStDTAservice {
-  void *dtaHdl;
-  bool dtaRunning;
-
-} TstDTAservice;
-
-char g_initParms[] = "DTAIF=DTA_TCIF_NFCFORUM IXIT=DEFAULT";
-
 static void dtaCallback(void *context, TStateDta state, char *data,
                         uint32_t length);
-
-//////////////////////////////////////////////
-//////////////////////////////////////////////
 
 NfcStDtaExtensions NfcStDtaExtensions::sStDtaExtensions;
 
 const char *NfcStDtaExtensions::APP_NAME = "nfc_st_dta_ext";
+
 PDtaProviderInitialize pDtaProviderInitialize;
 PDtaProviderShutdown pDtaProviderShutdown;
+
 static const struct {
   void **funcPtr;
   const char *funcName;
@@ -66,7 +68,7 @@ static const struct {
     {(void **)&pDtaProviderInitialize, "dta_Initialize"},
     {(void **)&pDtaProviderShutdown, "dta_Shutdown"},
 };
-static void *fd;
+static void *fd = NULL;
 
 /*******************************************************************************
  **
@@ -77,7 +79,7 @@ static void *fd;
  ** Returns:         None
  **
  *******************************************************************************/
-NfcStDtaExtensions::NfcStDtaExtensions() {}
+NfcStDtaExtensions::NfcStDtaExtensions() { dta_lib_state = DTA_STATE_UNKNOWN; }
 
 /*******************************************************************************
  **
@@ -94,76 +96,121 @@ NfcStDtaExtensions::~NfcStDtaExtensions() {}
  **
  ** Function:        getInstance
  **
- ** Description:     Get the StSecureElement singleton object.
+ ** Description:     Get the NfcStDtaExtensions singleton object.
  **
- ** Returns:         StSecureElement object.
+ ** Returns:         NfcStDtaExtensions object.
  **
  *******************************************************************************/
 NfcStDtaExtensions &NfcStDtaExtensions::getInstance() {
   return sStDtaExtensions;
 }
 
-bool NfcStDtaExtensions::initialize() {
+uint32_t NfcStDtaExtensions::initialize(nfc_jni_native_data *native,
+                                        bool nfc_state) {
   uint32_t error = 0;
   size_t i;
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
+
+  mDtaNativeData = native;
+
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+                                         "%s: enter; nfc_state=%d, "
+                                         "DTA JNI library state is",
+                                         __func__, nfc_state)
+                                  << dtaLibState[dta_lib_state];
+
+  if (nfc_state == true) {
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s: NFC Service state inconsistent with DTA requirements", __func__);
+    dta_lib_state = DTA_STATE_UNINITIALIZED;
+    return dtaStatusFailed;
+  }
+
   memset(&dta_info, 0, sizeof(tJNI_DTA_INFO));
+
   fd = dlopen("libnfc_st_dta.so", RTLD_NOW);
+
   if (fd == NULL) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: unable to load DTA library", __func__);
-    return false;
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s: unable to load DTA library (%s)", __func__, dlerror());
+    return dtaStatusLibNotFound;
   } else {
-    DLOG_IF(INFO, nfc_debug_enabled)
+    LOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s: success to load DTA library", __func__);
   }
+
+  /* clear any existing error */
   dlerror();
+
+  /* import all symbols */
   for (i = 0; i < sizeof(importTable) / sizeof(importTable[0]); i++) {
     void *func = dlsym((void *)fd, importTable[i].funcName);
     if (func == NULL) {
-      DLOG_IF(INFO, nfc_debug_enabled)
+      LOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s: unable to import dynamic symbol '%s'", __func__,
                           importTable[i].funcName);
       error++;
     } else {
-      DLOG_IF(INFO, nfc_debug_enabled)
+      LOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s: success to import dynamic symbol '%s'", __func__,
                           importTable[i].funcName);
     }
+
     *importTable[i].funcPtr = func;
   }
-  if (error || (dlerror() != NULL)) {
-    return false;
-  }
-  dta_info.dta_mode = DTA_MODE_DP;
 
-  return true;
+  if (error || (dlerror() != NULL)) {
+    return dtaStatusLibLoadFailed;
+  }
+
+  dta_lib_state = DTA_STATE_INITIALIZED;
+  return dtaStatusLibLoadSuccess;
 }
 
 bool NfcStDtaExtensions::deinitialize() {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-  dlclose(fd);
-  dta_info.dta_mode = DTA_MODE_DP;
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+                                         "%s: enter; "
+                                         "DTA JNI library state is",
+                                         __func__)
+                                  << dtaLibState[dta_lib_state];
+
+  if (fd == NULL) {
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s: unexpected DTA JNI library file descriptor", __func__);
+    dta_lib_state = DTA_STATE_UNKNOWN;
+    return false;
+  } else {
+    if (dlclose(fd) == 0) {
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: success to unload DTA JNI library", __func__);
+    } else {
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: fail to unload DTA JNI library", __func__);
+      return false;
+    }
+  }
+
+  /* clear function pointers */
+  for (uint32_t i = 0; i < sizeof(importTable) / sizeof(importTable[0]); i++) {
+    *importTable[i].funcPtr = 0;
+  }
+
+  dta_lib_state = DTA_STATE_UNINITIALIZED;
   return true;
 }
 
-void NfcStDtaExtensions::setPatternNb(uint32_t patternNb) {
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter; patternNb=0x%u", __func__, patternNb);
-  dta_info.pattern_nb = patternNb;
-}
-
 void NfcStDtaExtensions::setCrVersion(uint8_t ver) {
-  DLOG_IF(INFO, nfc_debug_enabled)
+  LOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s: enter; CR version=%d", __func__, ver);
   dta_info.cr_version = ver;
 }
 
 void NfcStDtaExtensions::setConnectionDevicesLimit(uint8_t cdlA, uint8_t cdlB,
                                                    uint8_t cdlF, uint8_t cdlV) {
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter; CDL_A=%d, CDL_B=%d, CDL_F=%d, CDL_V=%d",
-                      __func__, cdlA, cdlB, cdlF, cdlV);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      "%s: enter; CDL_A=%d, CDL_B=%d, "
+      "CDL_F=%d, CDL_V=%d",
+      __func__, cdlA, cdlB, cdlF, cdlV);
+
   dta_info.cdl_A = cdlA;
   dta_info.cdl_B = cdlB;
   dta_info.cdl_F = cdlF;
@@ -171,135 +218,141 @@ void NfcStDtaExtensions::setConnectionDevicesLimit(uint8_t cdlA, uint8_t cdlB,
 }
 
 void NfcStDtaExtensions::setListenNfcaUidMode(uint8_t mode) {
-  DLOG_IF(INFO, nfc_debug_enabled)
+  LOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s: enter; Nfc-A UID mode=%u", __func__, mode);
   dta_info.nfca_uid_gen_mode = mode;
 }
 
 void NfcStDtaExtensions::setT4atNfcdepPrio(uint8_t prio) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
+
   if ((prio & NFA_PROTOCOL_MASK_NFC_DEP) == NFA_PROTOCOL_MASK_NFC_DEP) {
-    DLOG_IF(INFO, nfc_debug_enabled)
+    LOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s: NFC-DEP priority over T4AT", __func__);
     dta_info.t4at_nfcdep_prio = 0;
   } else {
-    DLOG_IF(INFO, nfc_debug_enabled)
+    LOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s: T4AT priority over NFC-DEP", __func__);
     dta_info.t4at_nfcdep_prio = 1;
   }
 }
 
-void NfcStDtaExtensions::setFsdFscExtension(bool ext) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-
-  (ext == false) ? DLOG_IF(INFO, nfc_debug_enabled)
-                       << StringPrintf("%s: enter; RF frame 256B", __func__)
-                 : DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-                       "%s: enter; RF frame extension 4096B", __func__);
+void NfcStDtaExtensions::setFsdFscExtension(uint32_t ext) {
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      "%s: enter; RF frame extension "
+      "config=0x%04X",
+      __func__, ext);
   dta_info.ext_rf_frame = ext;
 }
 
 void NfcStDtaExtensions::setLlcpMode(uint32_t miux_mode) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-
-  dta_info.dta_mode = DTA_MODE_LLCP;
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: MIUXiut mode=%u", __func__, miux_mode);
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s: enter; MIUXiut mode=%u", __func__, miux_mode);
   dta_info.miux_mode = miux_mode;
 }
 
-void NfcStDtaExtensions::setSnepMode(uint8_t role, uint8_t server_type,
-                                     uint8_t request_type, uint8_t data_type,
-                                     bool disc_incorrect_len) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-
-  dta_info.dta_mode = DTA_MODE_SNEP;
-
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s: role=%u, server_type=%u, request_type=%u, data=%u, "
-      "disc_incorrect_len=%u",
-      __func__, role, server_type, request_type, data_type, disc_incorrect_len);
-  dta_info.role = role;
-  dta_info.server_type = server_type;
-  dta_info.request_type = request_type;
-  dta_info.data_type = data_type;
-  dta_info.disc_incorrect_len = disc_incorrect_len;
+void NfcStDtaExtensions::setNfcDepWT(uint8_t wt) {
+  LOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s: enter; WT=%d", __func__, wt);
+  dta_info.waiting_time = wt;
 }
 
-uint32_t NfcStDtaExtensions::enableDiscovery(
-    uint8_t con_poll, uint8_t con_listen_dep, uint8_t con_listen_t4tp,
-    bool con_listen_t3tp, bool con_listen_acm, uint8_t con_bitr_f,
-    uint8_t con_bitr_acm) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
+uint32_t NfcStDtaExtensions::enableDiscovery(bool rf_mode, uint32_t pattern_nb,
+                                             uint8_t con_bitr_f,
+                                             uint32_t cr11_tagop_cfg) {
+  uint32_t status;
 
-  // dta_info.con_poll_A = ((con_poll & NFA_TECHNOLOGY_MASK_A) | (con_poll &
-  // NFA_TECHNOLOGY_MASK_ACTIVE)) ? 1 : 0;
-  dta_info.con_poll_A = (con_poll & NFA_TECHNOLOGY_MASK_A) ? 1 : 0;
-  dta_info.con_poll_B = (con_poll & NFA_TECHNOLOGY_MASK_B) ? 1 : 0;
-  // dta_info.con_poll_F = ((con_poll & NFA_TECHNOLOGY_MASK_F) | (con_poll &
-  // NFA_TECHNOLOGY_MASK_ACTIVE)) ? 1 : 0;
-  dta_info.con_poll_F = (con_poll & NFA_TECHNOLOGY_MASK_F) ? 1 : 0;
-  dta_info.con_poll_V = (con_poll & NFA_TECHNOLOGY_MASK_V) ? 1 : 0;
-  dta_info.con_poll_ACM = (con_poll & NFA_TECHNOLOGY_MASK_ACTIVE) ? 1 : 0;
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
 
-  dta_info.con_listen_dep_A = (con_listen_dep & NFA_TECHNOLOGY_MASK_A) ? 1 : 0;
-  dta_info.con_listen_dep_F = (con_listen_dep & NFA_TECHNOLOGY_MASK_F) ? 1 : 0;
-  dta_info.con_listen_t4Atp = (con_listen_t4tp & NFA_TECHNOLOGY_MASK_A) ? 1 : 0;
-  dta_info.con_listen_t4Btp = (con_listen_t4tp & NFA_TECHNOLOGY_MASK_B) ? 1 : 0;
-  dta_info.con_listen_t3tp = con_listen_t3tp;
-  dta_info.con_listen_acm = con_listen_acm;
-
+  if (dta_lib_state != DTA_STATE_INITIALIZED) {
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s: DTA JNI library not initialized properly ...", __func__);
+    dta_lib_state = DTA_STATE_UNKNOWN;
+    return dtaStatusFailed;
+  }
+  dta_info.rf_mode = rf_mode;
+  dta_info.pattern_nb = pattern_nb;
   dta_info.con_bitr_f = con_bitr_f;
-  dta_info.con_bitr_acm = con_bitr_acm;
+  dta_info.cr11_tagop_cfg = cr11_tagop_cfg;
 
-  return pDtaProviderInitialize(&dta_info.handle, (char *)g_initParms,
-                                dtaCallback, &dta_info);
+  status =
+      pDtaProviderInitialize(&dta_info.handle, NULL, dtaCallback, &dta_info);
+
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: exit;", __func__);
+
+  return status;
 }
 
 bool NfcStDtaExtensions::disableDiscovery() {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
-  uint8_t status;
+  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: enter;", __func__);
+  uint32_t status = dtaStatusFailed;
+
+  if (dta_lib_state != DTA_STATE_INITIALIZED) {
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s: DTA JNI library not initialized properly ...", __func__);
+    dta_lib_state = DTA_STATE_UNKNOWN;
+    return false;
+  }
 
   status = pDtaProviderShutdown(dta_info.handle);
+
   memset(&dta_info, 0, sizeof(tJNI_DTA_INFO));
-  return status;
+  if (status == dtaStatusSuccess) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+void NfcStDtaExtensions::notifyListeners(std::string evtSrc) {
+  JNIEnv *e = NULL;
+  ScopedAttach attach(mDtaNativeData->vm, &e);
+  CHECK(e);
+
+  ScopedLocalRef<jobject> srcJavaString(e, e->NewStringUTF(evtSrc.c_str()));
+  CHECK(srcJavaString.get());
+
+  e->CallVoidMethod(mDtaNativeData->manager,
+                    android::gCachedNativeNfcStDtaExtensionsNotifyListeners,
+                    srcJavaString.get());
 }
 
 static void dtaCallback(void *context, TStateDta state, char *data,
                         uint32_t length) {
-  // TstDTAservice *pService = (TstDTAservice *) context;
-
   switch (state) {
     case stDtaReady:
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s: enter; NFC stack started, discovery running", __func__);
-      // pService->dtaRunning = true;
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: enter; DTA ready", __func__);
       break;
 
-    case stDtaStackStopped:
-      DLOG_IF(INFO, nfc_debug_enabled)
+    case stDtaError: {
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: enter; DTA stated error !!!", __func__);
+      std::string error = "NFCC transport or timeout error";
+      NfcStDtaExtensions::getInstance().notifyListeners(error);
+    } break;
+
+    case stDtaNfcStackRunning:
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: enter; NFC stack running", __func__);
+      break;
+
+    case stDtaNfcStackStopped:
+      LOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s: enter; NFC stack stopped", __func__);
-      // pService->dtaRunning = false;
       break;
 
-    case stDtaError:
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: enter; DTA stated error!", __func__);
+    case stDtaNfcRfRunning:
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: enter; NFC RF running", __func__);
       break;
 
-    case stDtaTcRunning:
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: enter; DTA stated test case running", __func__);
-      break;
-
-    case stDtaTcStopped:
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: enter; DTA stated test case stopped", __func__);
+    case stDtaNfcRfStopped:
+      LOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s: enter; NFC RF stopped", __func__);
       break;
 
     default:
       break;
   }  // switch
-
 }  // dtaCallback

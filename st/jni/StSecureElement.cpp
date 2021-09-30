@@ -550,7 +550,7 @@ bool StSecureElement::connectEE() {
   LOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s: enter, Active eSE ID(nfceeId): 0x%04x", fn, nfceeId);
 
-  handleNfceePowerAndLinkCtrl(true);
+  android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, true);
 
   // Check if and which APDU gate is available
   if (getApduSettings() == false) {
@@ -668,7 +668,7 @@ bool StSecureElement::disconnectEE(jint seID) {
       << StringPrintf("%s: seID=0x%X; handle=0x%04x", fn, seID, eeHandle);
 
   // Sent EVT_END_OF_APDU_TRANSFER to eSE => no answer awaited
-  handleNfceePowerAndLinkCtrl(false);
+  android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, false);
 
   mIsPiping = false;
   return true;
@@ -910,23 +910,6 @@ void StSecureElement::notifyModeSet(tNFA_EE_MODE_SET modeSet) {
 
 /*******************************************************************************
 **
-** Function:        notifyPowerCtrlRsp
-**
-** Description:
-**
-** Returns:         None
-**
-*******************************************************************************/
-void StSecureElement::notifyPowerCtrlRsp() {
-  static const char* fn = "StSecureElement::notifyPowerCtrlRsp";
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: NFA_EE_PWR_AND_LINK_CTRL_EVT; ", fn);
-  SyncEventGuard guard(sSecElem.mPowerCtrlEvent);
-  sSecElem.mPowerCtrlEvent.notifyOne();
-}
-
-/*******************************************************************************
-**
 ** Function:        notifyEeStatus
 **
 ** Description:     Notify about the NFCEE status whether the init aws started
@@ -943,6 +926,10 @@ void StSecureElement::notifyEeStatus(tNFA_HANDLE eeHandle, uint8_t status) {
       << StringPrintf("%s: enter; ee status =%d", fn, status);
   gMutexEE.lock();
   tNFA_EE_INFO* pEE = sSecElem.findEeByHandle(eeHandle);
+  if (pEE == nullptr) {
+    LOG(ERROR) << StringPrintf("%s:pEE is NULL", fn);
+    return;
+  }
   tNFA_EE_INFO eeInfo = *pEE;
   gMutexEE.unlock();
 
@@ -1692,35 +1679,6 @@ tNFA_STATUS StSecureElement::handleEnableSESeq(tNFA_EE_INFO* eeItem,
   }
 
   return nfaStat;
-}
-
-/*******************************************************************************
- **
- ** Function:        endOfApduTransfer
- **
- ** Description:     Receive connection-related events from stack.
- **                  connEvent: Event code.
- **                  eventData: Event data.
- **
- ** Returns:         None
- **
- *******************************************************************************/
-void StSecureElement::handleNfceePowerAndLinkCtrl(bool alwaysOn) {
-  static const char fn[] = "StSecureElement::handleNfceePowerAndLinkCtrl";
-  SyncEventGuard guard(mPowerCtrlEvent);
-
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: enter - alwaysOn: %d", fn, alwaysOn);
-
-  // Send NFCEE_POWER_AND_LINK_CNTRL_CMD to ensure NFCC won't put eSE to sleep
-  android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, alwaysOn);
-
-  // mPowerCtrlEvent.wait();
-  if (mPowerCtrlEvent.wait(500) == false)  // wait for NFA_EE_MODE_SET_EVT
-  {
-    LOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s: timeout waiting for NFA_EE_POWER_CTRL_EVT", fn);
-  }
 }
 
 /*******************************************************************************

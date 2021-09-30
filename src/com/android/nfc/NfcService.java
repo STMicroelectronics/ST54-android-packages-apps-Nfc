@@ -813,6 +813,8 @@ public class NfcService implements DeviceHostListener {
         mScreenStateHelper = new ScreenStateHelper(mContext);
         mContentResolver = mContext.getContentResolver();
         mStExtensions = new NativeNfcStExtensions(mContext);
+        mStDtaExtensions = new NativeNfcStDtaExtensions(mContext);
+        mStDtaExtras = new StDtaExtrasService();
 
         mDeviceHost = new StNativeNfcManager(mContext, this, mStExtensions);
 
@@ -1756,6 +1758,11 @@ public class NfcService implements DeviceHostListener {
                 currentHceMode =
                         NfcAddonWrapper.getInstance()
                                 .getModeFlag(NfcSettingsAdapter.MODE_HCE, NfcService.this);
+            }
+
+            // If ongoing presence check, stop it to avoid possible issues
+            if (mPreviousTag != null) {
+                mPreviousTag.endPreviousPresenceCheck();
             }
 
             // NfcPermissions.enforceAdminPermissions(mContext);
@@ -4276,10 +4283,17 @@ public class NfcService implements DeviceHostListener {
 
     final class StDtaExtrasService extends INfcAdapterStDtaExtensions.Stub {
 
-        public boolean initialize() {
+        public int initialize() {
 
+            int result;
             Log.i(TAG, "initialize()");
-            boolean result = mStDtaExtensions.initialize();
+            if (isNfcEnabled()) {
+                Log.i(TAG, "initialize() with NFC service ON");
+                result = mStDtaExtensions.initialize(true);
+            } else {
+                Log.i(TAG, "initialize() with NFC service OFF");
+                result = mStDtaExtensions.initialize(false);
+            }
             return result;
         }
 
@@ -4288,12 +4302,6 @@ public class NfcService implements DeviceHostListener {
             Log.i(TAG, "deinitialize()");
             boolean result = mStDtaExtensions.deinitialize();
             return result;
-        }
-
-        public void setPatternNb(int iPatternNb) {
-
-            Log.i(TAG, "setPatternNb() " + iPatternNb);
-            mStDtaExtensions.setPatternNb(iPatternNb);
         }
 
         public void setCrVersion(byte bCrVersion) {
@@ -4323,82 +4331,46 @@ public class NfcService implements DeviceHostListener {
             mStDtaExtensions.setListenNfcaUidMode(bMode);
         }
 
-        public void setT4atNfcdepPrio(byte prio) {
+        public void setT4atNfcdepPrio(byte bT4tNfcDepPrio) {
 
-            Log.i(TAG, "setT4atNfcdepPrio() priority: " + prio);
-            mStDtaExtensions.setT4atNfcdepPrio(prio);
+            Log.i(TAG, "setT4atNfcdepPrio() priority: " + bT4tNfcDepPrio);
+            mStDtaExtensions.setT4atNfcdepPrio(bT4tNfcDepPrio);
         }
 
-        public void setFsdFscExtension(boolean ext) {
+        public void setFsdFscExtension(int iFsdFscExt) {
 
-            Log.i(TAG, "setFsdFscExtension() extension support: " + ext);
-            mStDtaExtensions.setFsdFscExtension(ext);
+            Log.i(TAG, "setFsdFscExtension() extension support: " + iFsdFscExt);
+            mStDtaExtensions.setFsdFscExtension(iFsdFscExt);
         }
 
-        public void setLlcpMode(int miux_mode) {
+        public void setLlcpMode(int iMiuxMode) {
 
-            Log.i(TAG, "setLlcpMode() miux_mode: " + miux_mode);
-            mStDtaExtensions.setLlcpMode(miux_mode);
+            Log.i(TAG, "setLlcpMode() MIUX mode: " + iMiuxMode);
+            mStDtaExtensions.setLlcpMode(iMiuxMode);
         }
 
-        public void setSnepMode(
-                byte role,
-                byte server_type,
-                byte request_type,
-                byte data_type,
-                boolean disc_incorrect_len) {
-
+        public int enableDiscovery(boolean isRfMode, int iPatternNb, byte bConBitrF, int iLtCfg) {
             Log.i(
                     TAG,
-                    "setSnepMode() role: "
-                            + role
-                            + ", server_type: "
-                            + server_type
-                            + ", request_type: "
-                            + request_type
-                            + ", data_type: "
-                            + data_type
-                            + ", disc_incorrect_len: "
-                            + disc_incorrect_len);
-            mStDtaExtensions.setSnepMode(
-                    role, server_type, request_type, data_type, disc_incorrect_len);
-        }
-
-        public int enableDiscovery(
-                byte con_poll,
-                byte con_listen_dep,
-                byte con_listen_t4tp,
-                boolean con_listen_t3tp,
-                boolean con_listen_acm,
-                byte con_bitr_f,
-                byte con_bitr_acm) {
-
-            Log.i(
-                    TAG,
-                    "enableDiscovery() con_poll: "
-                            + con_poll
-                            + ", con_listen_dep: "
-                            + con_listen_dep
-                            + ", con_listen_t4tp: "
-                            + con_listen_t4tp
-                            + ", con_listen_t3tp: "
-                            + con_listen_t3tp
-                            + ", con_listen_acm: "
-                            + con_listen_acm
+                    "enableDiscovery() RF mode: "
+                            + isRfMode
+                            + ", pattern nb: "
+                            + iPatternNb
                             + ", con_bitr_f: "
-                            + con_bitr_f
-                            + ", con_bitr_acm: "
-                            + con_bitr_acm);
+                            + bConBitrF
+                            + ", LT config: "
+                            + iLtCfg);
             int result =
                     mStDtaExtensions.enableDiscovery(
-                            con_poll,
-                            con_listen_dep,
-                            con_listen_t4tp,
-                            con_listen_t3tp,
-                            con_listen_acm,
-                            con_bitr_f,
-                            con_bitr_acm);
+                            isRfMode, iPatternNb,
+                            bConBitrF, iLtCfg);
             return result;
+        }
+
+        public void setNfcDepWT(byte bWt) {
+
+            Log.i(TAG, "setNfcDepWT() WT:" + bWt);
+            mStDtaExtensions.setNfcDepWT(bWt);
         }
 
         public boolean disableDiscovery() {
@@ -4406,6 +4378,45 @@ public class NfcService implements DeviceHostListener {
             Log.i(TAG, "disableDiscovery()");
             boolean result = mStDtaExtensions.disableDiscovery();
             return result;
+        }
+
+        public boolean enableNfcAdapter() {
+            NfcPermissions.enforceAdminPermissions(mContext);
+            if (mNfcAdapter == null) {
+                Log.e(TAG, "enableNfcAdapter(): mNfcAdapter null");
+                return false;
+            }
+
+            try {
+                Log.i(TAG, "enableNfcAdapter(): mNfcAdapter.getState()=" + mNfcAdapter.getState());
+
+                return mNfcAdapter.enable();
+            } catch (RemoteException e) {
+                return false;
+            }
+        }
+
+        public boolean disableNfcAdapter() {
+            NfcPermissions.enforceAdminPermissions(mContext);
+            if (mNfcAdapter == null) {
+                Log.e(TAG, "disableNfcAdapter(): mNfcAdapter null");
+                return false;
+            }
+            try {
+                Log.i(TAG, "disableNfcAdapter(): mNfcAdapter.getState()=" + mNfcAdapter.getState());
+
+                if ((mState == NfcAdapter.STATE_ON) || (mState == NfcAdapter.STATE_TURNING_ON)) {
+                    return mNfcAdapter.disable(true);
+                } else {
+                    Log.i(
+                            TAG,
+                            "disableNfcAdapter(): unexpected NfcAdapter state, "
+                                    + "NFC hardware state uncertain");
+                    return false;
+                }
+            } catch (RemoteException e) {
+                return false;
+            }
         }
     }
 
@@ -5018,6 +5029,9 @@ public class NfcService implements DeviceHostListener {
                 throws RemoteException {
             NfcPermissions.enforceAdminPermissions(mContext);
 
+            if (!mIsBeamCapable) {
+                Log.e(TAG, "enableServer called but Beam is disabled");
+            }
             if (serviceName.equals(null) || !mIsBeamCapable) return false;
 
             mP2pLinkManager.enableExtDtaSnepServer(
@@ -5035,6 +5049,9 @@ public class NfcService implements DeviceHostListener {
                 throws RemoteException {
             NfcPermissions.enforceAdminPermissions(mContext);
 
+            if (!mIsBeamCapable) {
+                Log.e(TAG, "enableClient called but Beam is disabled");
+            }
             if (testCaseId == 0 || !mIsBeamCapable) return false;
 
             if (testCaseId > 20) {

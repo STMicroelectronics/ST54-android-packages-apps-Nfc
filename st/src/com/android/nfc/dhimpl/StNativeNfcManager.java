@@ -133,12 +133,7 @@ public class StNativeNfcManager implements StDeviceHost {
     public native boolean routeAid(byte[] aid, int route, int aidInfo, int power);
 
     @Override
-    public native boolean setDefaultRoute(int defaultRouteEntry, int nonAidBasedRouteEntry);
-
-    @Override
     public native boolean unrouteAid(byte[] aid);
-
-    public native boolean doSetRoutingEntry(int type, int value, int route, int power);
 
     public native boolean clearAidTable();
 

@@ -22,8 +22,11 @@
 #include <jni.h>
 #include <semaphore.h>
 
+#include "JavaClassConstants.h"
 namespace android {
+
 extern const char* gNativeNfcStDtaExtensionsClassName;
 
 int register_com_android_nfc_NativeNfcStDtaExtensions(JNIEnv* e);
+
 }  // namespace android

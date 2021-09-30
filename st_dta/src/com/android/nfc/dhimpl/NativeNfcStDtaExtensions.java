@@ -18,8 +18,12 @@
 
 package com.android.nfc.dhimpl;
 
+import android.content.ComponentName;
 import android.content.Context;
+import android.content.Intent;
 import android.util.Log;
+
+// import android.content.ContentResolver;
 
 /**
  * Native interface to the NFC ST DTA Extensions functions
@@ -31,31 +35,18 @@ public class NativeNfcStDtaExtensions {
     private static final String TAG = "NativeNfcStDtaExtensions";
     private final Context mContext;
 
+    static final int ACTION_NOTIFY_ENABLE_DISCOVERY_STATUS = 50;
+
     public NativeNfcStDtaExtensions(Context context) {
 
         Log.d(TAG, "NativeNfcStDtaExtensions");
-        try {
-            Log.d(
-                    TAG,
-                    "libnfc_st_dta_jni load from path: "
-                            + System.getProperty("java.library.path")
-                            + "...");
-            System.loadLibrary("nfc_st_dta_jni");
-
-            Log.d(TAG, "ST Dta load successful!!!");
-        } catch (UnsatisfiedLinkError ule) {
-            /** UnsatisfiedLinkError */
-            Log.d(TAG, "ST Dta load failure!!!");
-        }
 
         mContext = context;
     }
 
-    public native boolean initialize();
+    public native int initialize(boolean nfc_state);
 
     public native boolean deinitialize();
-
-    public native void setPatternNb(int nb);
 
     public native void setCrVersion(byte ver);
 
@@ -65,25 +56,28 @@ public class NativeNfcStDtaExtensions {
 
     public native void setT4atNfcdepPrio(byte prio);
 
-    public native void setFsdFscExtension(boolean ext);
+    public native void setFsdFscExtension(int ext);
 
     public native void setLlcpMode(int miux_mode);
 
-    public native void setSnepMode(
-            byte role,
-            byte server_type,
-            byte request_type,
-            byte data_type,
-            boolean disc_incorrect_len);
+    public native void setNfcDepWT(byte wt);
 
-    public native int enableDiscovery(
-            byte con_poll,
-            byte con_listen_dep,
-            byte con_listen_t4tp,
-            boolean con_listen_t3tp,
-            boolean con_listen_acm,
-            byte con_bitr_f,
-            byte con_bitr_acm);
+    public native int enableDiscovery(boolean rf_mode, int nb, byte con_bitr_f, int lt_cfg);
 
     public native boolean disableDiscovery();
+
+    private void notifyListeners(String evtSrc) {
+        Intent statusIntent = new Intent();
+        try {
+            statusIntent.setAction("ACTION_NOTIFY_ENABLE_DISCOVERY_STATUS");
+            statusIntent.putExtra(Intent.EXTRA_TEXT, evtSrc);
+            statusIntent.setType("text/plain");
+            statusIntent.setComponent(
+                    new ComponentName("com.st.nfc.dta", "com.st.nfc.dta.DtaService"));
+            mContext.startService(statusIntent);
+
+        } catch (SecurityException e) {
+            Log.i(TAG, "Dta Notification Service not found");
+        }
+    }
 }

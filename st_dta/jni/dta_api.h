@@ -15,12 +15,13 @@
  *
  *  Device Test Application API for ST NFC Controllers
  *
- */
+ ******************************************************************************/
 
 #ifndef __DTA_API_H__
 #define __DTA_API_H__
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define DTAAPI
 #define DTAEXPORT extern
@@ -29,20 +30,15 @@
 extern "C" {
 #endif
 
-#define DTA_MODE_OFF 0xFF
-#define DTA_MODE_DP 0
-#define DTA_MODE_LLCP 1
-#define DTA_MODE_SNEP 2
-
 typedef enum {
   stDtaIdle = 0,  // 0
   stDtaError,     // 1
   stDtaReady,
-  stDtaTcRunning,
-  stDtaTcStopped,
-  stDtaStackStopped,
-  stDtaStackRunning,
-  stDtaWarning
+  /* stDtaWarning,*/
+  stDtaNfcStackStopped,
+  stDtaNfcStackRunning,
+  stDtaNfcRfStopped,
+  stDtaNfcRfRunning,
 } TStateDta;
 
 typedef enum tagDTAStatus {
@@ -85,28 +81,21 @@ typedef enum tagDTAStatus {
   dtaStatusLibLoadSuccess = 0x25,
   dtaStatusLibLoadFailed = 0x26,
   dtaStatusReady = 0x27,
+  dtaStatusNfccOnRfOffSuccess = 0x28,
+  dtaStatusNfccRfError = 0x29,
+  dtaStatusNfccInitError = 0x2A,
+  dtaStatusNfccFieldOnError = 0x2B,
+
   dtaStatusRegistrationRejected = 0x40
 } DTASTATUS;
 
 typedef struct {
   void *handle;
-  uint8_t dtaRunning;
-  uint8_t dta_mode;
-  uint32_t pattern_nb;
+  bool rf_mode;
   uint8_t cr_version;
-  uint8_t con_poll_A;
-  uint8_t con_poll_B;
-  uint8_t con_poll_F;
-  uint8_t con_poll_V;
-  uint8_t con_poll_ACM;
-  uint8_t con_listen_dep_A;
-  uint8_t con_listen_dep_F;
-  uint8_t con_listen_t4Atp;
-  uint8_t con_listen_t4Btp;
-  uint8_t con_listen_t3tp;
-  uint8_t con_listen_acm;
+  uint32_t pattern_nb;
+  uint32_t cr11_tagop_cfg;
   uint8_t con_bitr_f;
-  uint8_t con_bitr_acm;
   uint8_t nfca_uid_gen_mode;
   uint8_t nfca_uid_size;
   uint8_t cdl_A;
@@ -114,13 +103,9 @@ typedef struct {
   uint8_t cdl_F;
   uint8_t cdl_V;
   uint8_t t4at_nfcdep_prio;
+  uint8_t waiting_time;
   uint32_t ext_rf_frame;
   uint32_t miux_mode;
-  uint8_t role;
-  uint8_t server_type;
-  uint8_t request_type;
-  uint8_t data_type;
-  uint8_t disc_incorrect_len;
 
 } tJNI_DTA_INFO;
 
@@ -129,10 +114,11 @@ typedef void(DTAAPI *PStDtaCallback)(void *context, TStateDta state, char *data,
 
 typedef DTASTATUS(DTAAPI *PDtaProviderInitialize)(void **, char *,
                                                   PStDtaCallback, void *);
+
 typedef DTASTATUS(DTAAPI *PDtaProviderShutdown)(void *);
 
 #if defined(__cplusplus)
 }
 #endif
 
-#endif  // __DTA_JNI_API_H_
+#endif /* __DTA_API_H__ */
