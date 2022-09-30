@@ -1,0 +1,51 @@
+cc_library_shared {
+    name: "libstnfc_nci_jni",
+
+    cflags: [
+        "-Wall",
+        "-Wextra",
+        "-Wno-unused-parameter",
+        "-Werror",
+        "-DDCHECK_ALWAYS_ON"
+    ] ,
+
+    srcs: ["*.cpp"],
+
+    shared_libs: [
+        "libandroidicu",
+        "libnativehelper",
+        "libcutils",
+        "libutils",
+        "liblog",
+        "libstnfc-nci",
+        "libchrome",
+        "libbase",
+        "libdl",
+    ],
+
+    static_libs: [	"libxml2",
+    				"libstnfc_jni"],
+
+    export_include_dirs: ["."],
+
+    export_shared_lib_headers:
+    [
+      "libstnfc-nci",
+    ],
+
+    export_static_lib_headers:
+    [
+      "libstnfc_jni",
+    ],
+
+    sanitize: {
+        integer_overflow: true,
+        misc_undefined: ["bounds"],
+        scs: true,
+    },
+
+    proprietary: false,
+    owner: "st",
+    system_ext_specific: true,
+
+}
