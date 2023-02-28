@@ -37,7 +37,7 @@
 #include "StNfcTag.h"
 #include "PeerToPeer.h"
 #include "NfcStExtensions.h"
-#include "StCardEmulationEmbedded.h"
+#include "StNdefNfcee.h"
 #include "PowerSwitch.h"
 #include "StRoutingManager.h"
 #include "IntervalTimer.h"
@@ -98,7 +98,8 @@ extern void nativeNfcTag_handleNonNciMultiCardDetection(
 extern void nativeNfcTag_setP2pPrioLogic(bool status);
 
 extern void nativeNfcTag_resetSwitchFrameRfToIso();
-extern bool nativeNfcTag_isMaybeCashbee();
+
+extern bool nativeNfcTag_isReselectIdleTag();
 
 extern bool getReconnectState(void);
 
@@ -144,20 +145,20 @@ jmethodID gCachedNfcManagerNotifyRawAuthStatus;
 jmethodID gCachedNfcManagerNotifyPollingLoopData;
 
 const char* gNativeP2pDeviceClassName =
-    "com/android/nfc/dhimpl/NativeP2pDevice";
+    "com/android/nfcstm/dhimpl/NativeP2pDevice";
 const char* gNativeLlcpServiceSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpServiceSocket";
+    "com/android/nfcstm/dhimpl/NativeLlcpServiceSocket";
 const char* gNativeLlcpConnectionlessSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpConnectionlessSocket";
+    "com/android/nfcstm/dhimpl/NativeLlcpConnectionlessSocket";
 const char* gNativeLlcpSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpSocket";
-const char* gNativeNfcTagClassName = "com/android/nfc/dhimpl/StNativeNfcTag";
+    "com/android/nfcstm/dhimpl/NativeLlcpSocket";
+const char* gNativeNfcTagClassName = "com/android/nfcstm/dhimpl/StNativeNfcTag";
 const char* gStNativeNfcManagerClassName =
-    "com/android/nfc/dhimpl/StNativeNfcManager";
+    "com/android/nfcstm/dhimpl/StNativeNfcManager";
 const char* gStNativeNfcSecureElementClassName =
-    "com/android/nfc/dhimpl/StNativeNfcSecureElement";
+    "com/android/nfcstm/dhimpl/StNativeNfcSecureElement";
 const char* gNativeNfcStExtensionsClassName =
-    "com/android/nfc/dhimpl/NativeNfcStExtensions";
+    "com/android/nfcstm/dhimpl/NativeNfcStExtensions";
 void doStartupConfig();
 void startStopPolling(bool isStartPolling);
 void startRfDiscovery(bool isStart);
@@ -933,8 +934,7 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
 
         if (gIsSelectingRfInterface) {
           nativeNfcTag_doConnectStatus(true);
-          if (NfcTag::getInstance().isCashBeeActivated() == true ||
-              NfcTag::getInstance().isEzLinkTagActivated() == true) {
+          if (nativeNfcTag_isReselectIdleTag() == true) {
             NfcTag::getInstance().connectionEventHandler(
                 NFA_ACTIVATED_UPDATE_EVT, eventData);
           }
@@ -1358,16 +1358,16 @@ static jboolean stNfcManager_initNativeStruc(JNIEnv* e, jobject o) {
   /* Initialize native cached references */
   gCachedNfcManagerNotifyNdefMessageListeners =
       e->GetMethodID(cls.get(), "notifyNdefMessageListeners",
-                     "(Lcom/android/nfc/dhimpl/StNativeNfcTag;)V");
+                     "(Lcom/android/nfcstm/dhimpl/StNativeNfcTag;)V");
   gCachedNfcManagerNotifyLlcpLinkActivation =
       e->GetMethodID(cls.get(), "notifyLlcpLinkActivation",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
   gCachedNfcManagerNotifyLlcpLinkDeactivated =
       e->GetMethodID(cls.get(), "notifyLlcpLinkDeactivated",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
   gCachedNfcManagerNotifyLlcpFirstPacketReceived =
       e->GetMethodID(cls.get(), "notifyLlcpLinkFirstPacketReceived",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
 
   gCachedNfcManagerNotifyHostEmuActivated =
       e->GetMethodID(cls.get(), "notifyHostEmuActivated", "(I)V");
@@ -1889,7 +1889,7 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
           doDtaStartupConfig(halFuncEntries);
         }
         StSecureElement::getInstance().initialize(getNative(e, o));
-        StCardEmulationEmbedded::getInstance().initialize(getNative(e, o));
+        StNdefNfcee::getInstance().initialize(getNative(e, o));
         sRoutingInitialized =
             StRoutingManager::getInstance().initialize(getNative(e, o));
 
@@ -2155,13 +2155,14 @@ static void stNfcManager_enableDiscovery(
     // Stop RF discovery to reconfigure
     startRfDiscovery(false);
 
-    if (sWalletTechIsMute & ST_CE_MUTE_DISCOVERY) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; sWalletTechIsMute = 0x%02X, Discovery stopped",
-                          __func__, sWalletTechIsMute);
-      gIsReconfiguringDiscovery.end();
-      return;
-    }
+    // if (sWalletTechIsMute & ST_CE_MUTE_DISCOVERY) {
+    //   DLOG_IF(INFO, nfc_debug_enabled)
+    //       << StringPrintf("%s; sWalletTechIsMute = 0x%02X, Discovery
+    //       stopped",
+    //                       __func__, sWalletTechIsMute);
+    //   gIsReconfiguringDiscovery.end();
+    //   return;
+    // }
   }
 
   // Check polling configuration
@@ -2237,15 +2238,25 @@ static void stNfcManager_enableDiscovery(
   }
 
   // Check listen configuration
-  if (enable_host_routing) {
-    StRoutingManager::getInstance().enableRoutingToHost();
-    StRoutingManager::getInstance().commitRouting();
-  } else {
-    StRoutingManager::getInstance().disableRoutingToHost();
-    StRoutingManager::getInstance().commitRouting();
-  }
+  // if (enable_host_routing) {
+  //   StRoutingManager::getInstance().enableRoutingToHost();
+  //   StRoutingManager::getInstance().commitRouting();
+  // } else {
+  //   StRoutingManager::getInstance().disableRoutingToHost();
+  //   StRoutingManager::getInstance().commitRouting();
+  // }
+
+  StRoutingManager::getInstance().commitRouting();
+
   // Actually start discovery.
-  startRfDiscovery(true);
+  if (sWalletTechIsMute & ST_CE_MUTE_DISCOVERY) {
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; sWalletTechIsMute = 0x%02X, Discovery stopped",
+                        __func__, sWalletTechIsMute);
+    // startRfDiscovery(false);
+  } else {
+    startRfDiscovery(true);
+  }
   sDiscoveryEnabled = true;
 
   PowerSwitch::getInstance().setModeOn(PowerSwitch::DISCOVERY);
@@ -2691,8 +2702,8 @@ static jboolean nfcManager_setForceSAK(JNIEnv* e, jobject o, jboolean enabled,
 
   // Set the forced SAK mode enabled or disabled
   uint8_t i;
-  uint8_t nfceeid[3];
-  uint8_t conInfo[3];
+  uint8_t nfceeid[NFA_EE_MAX_EE_SUPPORTED];
+  uint8_t conInfo[NFA_EE_MAX_EE_SUPPORTED];
   uint8_t force_sak[] = {0x82, (uint8_t)sak};
 
   // find the correct NFCEE ID
@@ -2847,7 +2858,6 @@ bool nfcManager_SetMuteTech(JNIEnv* e, jobject o, jboolean muteA,
       StRoutingManager::getInstance().setMuteTech(newMask);
 
       if (isCommitNeeded) {
-        StRoutingManager::getInstance().updateRoutingTable();
         StRoutingManager::getInstance().commitRouting();
       }
 
@@ -2911,7 +2921,6 @@ static bool nfcManager_MuteAllTech(JNIEnv* e, jobject o, jboolean doMute) {
         NFA_SetMuteTech(false, false, false);
       }
 
-      StRoutingManager::getInstance().updateRoutingTable();
       StRoutingManager::getInstance().commitRouting();
 
       if (wasStopped) {
@@ -3486,11 +3495,11 @@ static jboolean stNfcManager_doSetNfcSecure(JNIEnv* e, jobject o,
       << StringPrintf("%s; enable = %d", __func__, enable);
   StRoutingManager& routingManager = StRoutingManager::getInstance();
   routingManager.setNfcSecure(enable);
-  if (sRoutingInitialized) {
-    routingManager.disableRoutingToHost();
-    routingManager.updateRoutingTable();
-    routingManager.enableRoutingToHost();
-  }
+  // if (sRoutingInitialized) {
+  //   routingManager.disableRoutingToHost();
+  //   routingManager.commitRouting();
+  //   routingManager.enableRoutingToHost();
+  // }
   return true;
 }
 
@@ -3645,15 +3654,16 @@ static JNINativeMethod gMethods[] = {
     {"doActivateLlcp", "()Z", (void*)stNfcManager_doActivateLlcp},
 
     {"doCreateLlcpConnectionlessSocket",
-     "(ILjava/lang/String;)Lcom/android/nfc/dhimpl/"
+     "(ILjava/lang/String;)Lcom/android/nfcstm/dhimpl/"
      "NativeLlcpConnectionlessSocket;",
      (void*)stNfcManager_doCreateLlcpConnectionlessSocket},
 
     {"doCreateLlcpServiceSocket",
-     "(ILjava/lang/String;III)Lcom/android/nfc/dhimpl/NativeLlcpServiceSocket;",
+     "(ILjava/lang/String;III)Lcom/android/nfcstm/dhimpl/"
+     "NativeLlcpServiceSocket;",
      (void*)stNfcManager_doCreateLlcpServiceSocket},
 
-    {"doCreateLlcpSocket", "(IIII)Lcom/android/nfc/dhimpl/NativeLlcpSocket;",
+    {"doCreateLlcpSocket", "(IIII)Lcom/android/nfcstm/dhimpl/NativeLlcpSocket;",
      (void*)stNfcManager_doCreateLlcpSocket},
 
     {"doGetLastError", "()I", (void*)stNfcManager_doGetLastError},

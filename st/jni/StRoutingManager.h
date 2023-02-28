@@ -114,6 +114,8 @@ class StRoutingManager {
   static void nfaEeCallback(tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* eventData);
   static void nfcFCeCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
 
+  void setEeInfoChangedFlag();
+
   static int com_android_nfc_cardemulation_doGetDefaultRouteDestination(
       JNIEnv* e);
   static int com_android_nfc_cardemulation_doGetDefaultOffHostRouteDestination(

@@ -131,6 +131,9 @@ class NfcStExtensions {
   uint32_t mFwInfo;
   uint16_t mHwInfo;
 
+  bool mIsEseSyncId;
+  bool mIsEseReset;
+
   void setCoreResetNtfInfo(uint8_t* ptr_manu_info);
   void initializeRfConfig();
   int getCustomerData(uint8_t* customerData);
@@ -147,45 +150,6 @@ class NfcStExtensions {
   **
   *******************************************************************************/
   static void nfaVsCbActionRequest(uint8_t oid, uint16_t len, uint8_t* p_msg);
-
-  /*******************************************************************************
-   **
-   ** Function:        connectGate
-   **
-   ** Description:     Create and opens a pipe (if needed) between the DH and
-   *the
-   **                  specified host on the specified gate. Returns the id
-   **                  of the pipe or 0xFF if the operation failed.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  int connectGate(int gateId, int hostId);
-
-  /*******************************************************************************
-   **
-   ** Function:        transceive
-   **
-   ** Description:     Sends data between the DH and the specified SWP host on
-   **                  the specified pipe. Returns the received data.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  bool transceive(uint8_t pipeId, uint8_t hciCmd, uint16_t txBufferLength,
-                  uint8_t* txBuffer, int32_t& recvBufferActualSize,
-                  uint8_t* rxBuffer);
-
-  /*******************************************************************************
-   **
-   ** Function:        disconnectGate
-   **
-   ** Description:     Closes the specified pipe.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  void disconnectGate(uint8_t pipeId);
 
   /*******************************************************************************
    **
@@ -324,18 +288,6 @@ class NfcStExtensions {
 
   /*******************************************************************************
    **
-   ** Function:        handleLoopback
-   **
-   ** Description:     Performs loopback operations
-   **                  Is part of ST Extensions.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  int handleLoopback();
-
-  /*******************************************************************************
-   **
    ** Function:        prepareGate
    **
    ** Description:     Prepares the gate to be used:
@@ -383,18 +335,6 @@ class NfcStExtensions {
    **
    *******************************************************************************/
   void setNfcSystemProp(const char* key_id, const char* key_value);
-
-  /*******************************************************************************
-   **
-   ** Function:        getHceUserProp
-   **
-   ** Description:     Retrieves the HCE capabilities as set by the user
-   **                  Is part of ST Extensions.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  int getHceUserProp();
 
   /*******************************************************************************
    **
@@ -686,7 +626,8 @@ class NfcStExtensions {
                            uint8_t* p_data);
 
   static void StRestartCallback();
-  void notifyRestart(bool ese_reset, bool ese_syncid);
+
+  static void triggerNfcRestart(bool eSeReset, bool eSeResetSync);
 
   /*******************************************************************************
    **
@@ -807,10 +748,6 @@ class NfcStExtensions {
   static const uint8_t NFCC_CONFIGURATION_REG_SIZE = 0x05;
   static const uint8_t TEST_CONFIGURATION_REG_SIZE = 0x1C;
 
-  static const uint8_t LOOPBACK_GATE_ID = 0x4;
-
-  static const uint8_t SIZE_LOOPBACK_DATA = 240;
-
   static const uint8_t ID_MGMT_GATE_ID = 0x05;
   static const uint8_t CLF_ID = 0x00;
   static const uint8_t VERSION_SW_REG_IDX = 0x01;
@@ -847,7 +784,6 @@ class NfcStExtensions {
   tJNI_VDC_MEAS_CONFIG mVdcMeasConfig;
   tJNI_ID_MGMT_INFO mIdMgmtInfo;
   uint8_t mCrcConfig[CRC_CONFIG_SIZE];
-  tJNI_ID_MGMT_INFO mLoopbackInfo;
   uint8_t mFwVersion[FW_VERSION_SIZE];
   uint16_t mRspSize;
   tJNI_RF_CONFIG mRfConfig;
@@ -974,7 +910,7 @@ class NfcStExtensions {
   bool mEseActivationOngoing;
   void StMonitorSeActivation(uint8_t format, uint16_t data_len, uint8_t* p_data,
                              bool last);
-  static void StMonitorSeActivationWATriggered(NfcStExtensions* inst);
+
   int mStMonitorSeActivationState;
 #define STMONITORSTATE_INITIAL 0
 #define STMONITORSTATE_GOT_CLEAR_ALL_PIPES 1
@@ -1052,6 +988,8 @@ class NfcStExtensions {
 
   bool mIsObserverMode;
   bool needUnmuteTechForObserverMode();
+
+  static void notifyRestart();
 
   void StRPLAddOneEventLocked(char type, uint8_t gain, uint32_t ts);
 

@@ -130,7 +130,7 @@ static jboolean nativeLlcpServiceSocket_doClose(JNIEnv* e, jobject o) {
 **
 *****************************************************************************/
 static JNINativeMethod gMethods[] = {
-    {"doAccept", "(III)Lcom/android/nfc/dhimpl/NativeLlcpSocket;",
+    {"doAccept", "(III)Lcom/android/nfcstm/dhimpl/NativeLlcpSocket;",
      (void*)nativeLlcpServiceSocket_doAccept},
     {"doClose", "()Z", (void*)nativeLlcpServiceSocket_doClose},
 };

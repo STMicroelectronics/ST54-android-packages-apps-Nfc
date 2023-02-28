@@ -62,6 +62,8 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
     return JNI_ERR;
   if (android::register_com_android_nfc_NativeNfcStExtensions(e) == -1)
     return JNI_ERR;
+  if (android::register_com_android_nfc_NativeNdefNfcee(e) == -1)
+    return JNI_ERR;
   if (StRoutingManager::getInstance().registerJniFunctions(e) == -1)
     return JNI_ERR;
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);

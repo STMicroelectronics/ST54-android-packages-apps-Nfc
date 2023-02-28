@@ -63,8 +63,6 @@ NfcTag::NfcTag()
       mNumDiscTechList(0),
       mTechListIndex(0),
       mNumRfDiscId(0),
-      mCashbeeDetected(false),
-      mEzLinkTypeTag(false),
       mWaitingForSelect(false),
       mIsMultiProtocolTag(false),
       mIsReselecting(false),
@@ -2019,28 +2017,6 @@ void NfcTag::setTransceiveTimeout(int techId, int timeout) {
 
 /*******************************************************************************
 **
-** Function:        isEzLinkTagActivated
-**
-** Description:     checks if EzLinkTag tag is detected
-**
-** Returns:         True if tag is activated.
-**
-*******************************************************************************/
-bool NfcTag::isEzLinkTagActivated() { return mEzLinkTypeTag; }
-
-/*******************************************************************************
-**
-** Function:        isCashBeeActivated
-**
-** Description:     checks if cashbee tag is detected
-**
-** Returns:         True if tag is activated.
-**
-*******************************************************************************/
-bool NfcTag::isCashBeeActivated() { return mCashbeeDetected; }
-
-/*******************************************************************************
-**
 ** Function:        getPresenceCheckAlgorithm
 **
 ** Description:     Get presence-check algorithm from .conf file.
@@ -2184,3 +2160,14 @@ bool NfcTag::isReselecting() { return mIsReselecting; }
 **
 *******************************************************************************/
 void NfcTag::setReselect(bool isReselecting) { mIsReselecting = isReselecting; }
+
+/*******************************************************************************
+**
+** Function:        resetNdefDetectionTimedOut
+**
+** Description:     Whether the currently activated tag is Kovio Type-2 tag.
+**
+** Returns:         True if tag is Kovio Type-2 tag.
+**
+*******************************************************************************/
+void NfcTag::resetNdefDetectionTimedOut() { mNdefDetectionTimedOut = false; }

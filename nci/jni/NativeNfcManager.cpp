@@ -69,6 +69,7 @@ extern void nativeNfcTag_formatStatus(bool is_ok);
 extern void nativeNfcTag_resetPresenceCheck();
 extern void nativeNfcTag_doReadCompleted(tNFA_STATUS status);
 extern void nativeNfcTag_setRfInterface(tNFA_INTF_TYPE rfInterface);
+extern void nativeNfcTag_setActivatedRfProtocol(tNFA_INTF_TYPE rfProtocol);
 extern void nativeNfcTag_abortWaits();
 extern void nativeLlcpConnectionlessSocket_abortWait();
 extern void nativeNfcTag_registerNdefTypeHandler();
@@ -105,16 +106,16 @@ jmethodID gCachedNfcManagerNotifyRfFieldDeactivated;
 jmethodID gCachedNfcManagerNotifyEeUpdated;
 jmethodID gCachedNfcManagerNotifyHwErrorReported;
 const char* gNativeP2pDeviceClassName =
-    "com/android/nfc/dhimpl/NativeP2pDevice";
+    "com/android/nfcstm/dhimpl/NativeP2pDevice";
 const char* gNativeLlcpServiceSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpServiceSocket";
+    "com/android/nfcstm/dhimpl/NativeLlcpServiceSocket";
 const char* gNativeLlcpConnectionlessSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpConnectionlessSocket";
+    "com/android/nfcstm/dhimpl/NativeLlcpConnectionlessSocket";
 const char* gNativeLlcpSocketClassName =
-    "com/android/nfc/dhimpl/NativeLlcpSocket";
-const char* gNativeNfcTagClassName = "com/android/nfc/dhimpl/NativeNfcTag";
+    "com/android/nfcstm/dhimpl/NativeLlcpSocket";
+const char* gNativeNfcTagClassName = "com/android/nfcstm/dhimpl/NativeNfcTag";
 const char* gNativeNfcManagerClassName =
-    "com/android/nfc/dhimpl/NativeNfcManager";
+    "com/android/nfcstm/dhimpl/NativeNfcManager";
 void doStartupConfig();
 void startStopPolling(bool isStartPolling);
 void startRfDiscovery(bool isStart);
@@ -246,18 +247,31 @@ nfc_jni_native_data* getNative(JNIEnv* e, jobject o) {
 **
 *******************************************************************************/
 static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
+  NfcTag& natTag = NfcTag::getInstance();
+  natTag.setNumDiscNtf(natTag.getNumDiscNtf() + 1);
   if (discoveredDevice->more == NCI_DISCOVER_NTF_MORE) {
     // there is more discovery notification coming
     return;
   }
 
-  bool isP2p = NfcTag::getInstance().isP2pDiscovered();
-  if (!sReaderModeEnabled && isP2p) {
+  bool isP2p = natTag.isP2pDiscovered();
+
+  if (natTag.getNumDiscNtf() > 1) {
+    natTag.setMultiProtocolTagSupport(true);
+    if (isP2p) {
+      // Remove NFC_DEP NTF count
+      // Skip NFC_DEP protocol in MultiProtocolTag select.
+      natTag.setNumDiscNtf(natTag.getNumDiscNtf() - 1);
+    }
+  }
+
+  if (sP2pEnabled && !sReaderModeEnabled && isP2p) {
     // select the peer that supports P2P
-    NfcTag::getInstance().selectP2p();
+    natTag.selectP2p();
   } else {
+    natTag.setNumDiscNtf(natTag.getNumDiscNtf() - 1);
     // select the first of multiple tags that is discovered
-    NfcTag::getInstance().selectFirstTag();
+    natTag.selectFirstTag();
   }
 }
 
@@ -325,6 +339,7 @@ static void nfaConnectionCallback(uint8_t connEvent,
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
           "%s: NFA_DISC_RESULT_EVT: status = %d", __func__, status);
       if (status != NFA_STATUS_OK) {
+        NfcTag::getInstance().setNumDiscNtf(0);
         LOG(ERROR) << StringPrintf("%s: NFA_DISC_RESULT_EVT error: status = %d",
                                    __func__, status);
       } else {
@@ -361,14 +376,23 @@ static void nfaConnectionCallback(uint8_t connEvent,
       break;
 
     case NFA_ACTIVATED_EVT:  // NFC link/protocol activated
+    {
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
           "%s: NFA_ACTIVATED_EVT: gIsSelectingRfInterface=%d, sIsDisabling=%d",
           __func__, gIsSelectingRfInterface, sIsDisabling);
+      uint8_t activatedProtocol =
+          (tNFA_INTF_TYPE)eventData->activated.activate_ntf.protocol;
+      if (NFC_PROTOCOL_T5T == activatedProtocol &&
+          NfcTag::getInstance().getNumDiscNtf()) {
+        /* T5T doesn't support multiproto detection logic */
+        NfcTag::getInstance().setNumDiscNtf(0);
+      }
       if ((eventData->activated.activate_ntf.protocol !=
            NFA_PROTOCOL_NFC_DEP) &&
           (!isListenMode(eventData->activated))) {
         nativeNfcTag_setRfInterface(
             (tNFA_INTF_TYPE)eventData->activated.activate_ntf.intf_param.type);
+        nativeNfcTag_setActivatedRfProtocol(activatedProtocol);
       }
       if (EXTNS_GetConnectFlag() == TRUE) {
         NfcTag::getInstance().setActivationState();
@@ -419,6 +443,12 @@ static void nfaConnectionCallback(uint8_t connEvent,
         }
       } else {
         NfcTag::getInstance().connectionEventHandler(connEvent, eventData);
+        if (NfcTag::getInstance().getNumDiscNtf()) {
+          /*If its multiprotocol tag, deactivate tag with current selected
+          protocol to sleep . Select tag with next supported protocol after
+          deactivation event is received*/
+          NFA_Deactivate(true);
+        }
 
         // We know it is not activating for P2P.  If it activated in
         // listen mode then it is likely for an SE transaction.
@@ -427,13 +457,13 @@ static void nfaConnectionCallback(uint8_t connEvent,
           sSeRfActive = true;
         }
       }
-      break;
-
+    } break;
     case NFA_DEACTIVATED_EVT:  // NFC link/protocol deactivated
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
           "%s: NFA_DEACTIVATED_EVT   Type: %u, gIsTagDeactivating: %d",
           __func__, eventData->deactivated.type, gIsTagDeactivating);
       NfcTag::getInstance().setDeactivationState(eventData->deactivated);
+      NfcTag::getInstance().selectNextTagIfExists();
       if (eventData->deactivated.type != NFA_DEACTIVATE_TYPE_SLEEP) {
         {
           SyncEventGuard g(gDeactivatedEvent);
@@ -672,16 +702,16 @@ static jboolean nfcManager_initNativeStruc(JNIEnv* e, jobject o) {
   /* Initialize native cached references */
   gCachedNfcManagerNotifyNdefMessageListeners =
       e->GetMethodID(cls.get(), "notifyNdefMessageListeners",
-                     "(Lcom/android/nfc/dhimpl/NativeNfcTag;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeNfcTag;)V");
   gCachedNfcManagerNotifyLlcpLinkActivation =
       e->GetMethodID(cls.get(), "notifyLlcpLinkActivation",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
   gCachedNfcManagerNotifyLlcpLinkDeactivated =
       e->GetMethodID(cls.get(), "notifyLlcpLinkDeactivated",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
   gCachedNfcManagerNotifyLlcpFirstPacketReceived =
       e->GetMethodID(cls.get(), "notifyLlcpLinkFirstPacketReceived",
-                     "(Lcom/android/nfc/dhimpl/NativeP2pDevice;)V");
+                     "(Lcom/android/nfcstm/dhimpl/NativeP2pDevice;)V");
 
   gCachedNfcManagerNotifyHostEmuActivated =
       e->GetMethodID(cls.get(), "notifyHostEmuActivated", "(I)V");
@@ -2206,15 +2236,16 @@ static JNINativeMethod gMethods[] = {
     {"doActivateLlcp", "()Z", (void*)nfcManager_doActivateLlcp},
 
     {"doCreateLlcpConnectionlessSocket",
-     "(ILjava/lang/String;)Lcom/android/nfc/dhimpl/"
+     "(ILjava/lang/String;)Lcom/android/nfcstm/dhimpl/"
      "NativeLlcpConnectionlessSocket;",
      (void*)nfcManager_doCreateLlcpConnectionlessSocket},
 
     {"doCreateLlcpServiceSocket",
-     "(ILjava/lang/String;III)Lcom/android/nfc/dhimpl/NativeLlcpServiceSocket;",
+     "(ILjava/lang/String;III)Lcom/android/nfcstm/dhimpl/"
+     "NativeLlcpServiceSocket;",
      (void*)nfcManager_doCreateLlcpServiceSocket},
 
-    {"doCreateLlcpSocket", "(IIII)Lcom/android/nfc/dhimpl/NativeLlcpSocket;",
+    {"doCreateLlcpSocket", "(IIII)Lcom/android/nfcstm/dhimpl/NativeLlcpSocket;",
      (void*)nfcManager_doCreateLlcpSocket},
 
     {"doGetLastError", "()I", (void*)nfcManager_doGetLastError},

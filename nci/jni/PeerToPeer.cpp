@@ -46,7 +46,9 @@ extern void nativeNfcTag_registerNdefTypeHandler();
 extern void nativeNfcTag_deregisterNdefTypeHandler();
 extern void startRfDiscovery(bool isStart);
 extern bool isDiscoveryStarted();
+
 extern bool gIsDtaEnabled;
+
 }  // namespace android
 
 PeerToPeer PeerToPeer::sP2p;
@@ -543,11 +545,6 @@ bool PeerToPeer::createClient(tJNI_HANDLE jniHandle, uint16_t miu, uint8_t rw) {
     return (false);
   }
 
-  if (i == sMax) {
-    LOG(ERROR) << StringPrintf("%s: fail", fn);
-    return (false);
-  }
-
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s: pClient: 0x%p  assigned for client jniHandle: %u",
                       fn, client.get(), jniHandle);
@@ -987,7 +984,7 @@ bool PeerToPeer::disconnectConnOriented(tJNI_HANDLE jniHandle) {
     return (false);
   }
 
-  // If this is a client, he may not be connected yet, so unblock him just in
+  // If this is a client, it may not be connected yet, so unblock it just in
   // case
   if (((pClient = findClient(jniHandle)) != NULL) && (pClient->mIsConnecting)) {
     SyncEventGuard guard(pClient->mConnectingEvent);

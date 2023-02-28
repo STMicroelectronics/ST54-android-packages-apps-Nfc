@@ -204,7 +204,7 @@ static jobject nativeLlcpConnectionlessSocket_doReceiveFrom(JNIEnv* e, jobject,
   }
 
   // Create new LlcpPacket object
-  if (nfc_jni_cache_object_local(e, "com/android/nfc/LlcpPacket",
+  if (nfc_jni_cache_object_local(e, "com/android/nfcstm/LlcpPacket",
                                  &(llcpPacket)) == -1) {
     LOG(ERROR) << StringPrintf("%s: Find LlcpPacket class error", __func__);
     return connectionlessCleanup();
@@ -282,7 +282,7 @@ static jboolean nativeLlcpConnectionlessSocket_doClose(JNIEnv* e, jobject o) {
 *****************************************************************************/
 static JNINativeMethod gMethods[] = {
     {"doSendTo", "(I[B)Z", (void*)nativeLlcpConnectionlessSocket_doSendTo},
-    {"doReceiveFrom", "(I)Lcom/android/nfc/LlcpPacket;",
+    {"doReceiveFrom", "(I)Lcom/android/nfcstm/LlcpPacket;",
      (void*)nativeLlcpConnectionlessSocket_doReceiveFrom},
     {"doClose", "()Z", (void*)nativeLlcpConnectionlessSocket_doClose},
 };

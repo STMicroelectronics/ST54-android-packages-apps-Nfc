@@ -29,6 +29,8 @@
     <string name="pair_no" msgid="5022308368904055020">"Hapana"</string>
     <string name="tap_again_to_pay" msgid="5754988005412859897">"Gusa tena ili kulipa kwa <xliff:g id="APP">%1$s</xliff:g>"</string>
     <string name="tap_again_to_complete" msgid="5423640945118279123">"Gusa tena ili kukamilisha kwa <xliff:g id="APP">%1$s</xliff:g>"</string>
+    <string name="tap_again_description" msgid="3019101527041529661">"Weka kwenye kisomaji"</string>
+    <string name="appchooser_description" msgid="2554187931814833244">"Chagua programu ili uchanganue"</string>
     <string name="transaction_failure" msgid="7828102078637936513">"Ununuzi huu haukuweza kukamilishwa kwa <xliff:g id="APP">%1$s</xliff:g>."</string>
     <string name="could_not_use_app" msgid="8137587876138569083">"Haikuweza kutumia <xliff:g id="APP">%1$s</xliff:g>."</string>
     <string name="pay_with" msgid="5531545488795798945">"Lipa kwa"</string>
@@ -41,7 +43,7 @@
     <string name="title_connect_to_network" msgid="2474034615817280146">"Unganisha kwenye mtandao"</string>
     <string name="prompt_connect_to_network" msgid="8511683573657516114">"Ungependa kuunganisha kwenye mtandao wa <xliff:g id="NETWORK_SSID">%1$s</xliff:g>?"</string>
     <string name="beam_requires_nfc_enabled" msgid="2800366967218600534">"Boriti ya Android inahitaji NFC iwe imewashwa. Je, unataka kuiwasha?"</string>
-    <string name="android_beam" msgid="1666446406999492763">"Sambaza kupitia Android"</string>
+    <string name="android_beam" msgid="1666446406999492763">"Android Beam"</string>
     <string name="beam_requires_external_storage_permission" msgid="8798337545702206901">"Programu haina Ruhusa ya kutumia Hifadhi ya Nje. Hii inahitajika ili Kusambaza faili hii."</string>
     <string name="title_confirm_url_open" msgid="8069968913244794478">"Ungependa kufungua kiungo?"</string>
     <string name="summary_confirm_url_open" product="tablet" msgid="3353502750736192055">"Kompyuta kibao yako imepokea kiungo kupitia NFC:"</string>

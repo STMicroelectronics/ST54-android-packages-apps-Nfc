@@ -43,10 +43,12 @@ namespace android {
 extern const char* gStNativeNfcManagerClassName;
 extern const char* gStNativeNfcSecureElementClassName;
 extern const char* gNativeNfcStExtensionsClassName;
+extern const char* gNativeNdefNfceeClassName;
 
 int register_com_android_nfc_stNativeNfcManager(JNIEnv* e);
 int register_com_android_nfc_stNativeNfcSecureElement(JNIEnv* e);
 int register_com_android_nfc_NativeNfcStExtensions(JNIEnv* e);
+int register_com_android_nfc_NativeNdefNfcee(JNIEnv* e);
 
 extern jmethodID gCachedNfcManagerNotifyDefaultRoutesSet;
 extern jmethodID gCachedNfcManagerNotifyHwErrorReported;

@@ -162,7 +162,7 @@ bool RoutingManager::initialize(nfc_jni_native_data* native) {
     LOG(ERROR) << StringPrintf("Failed to configure CE IsoDep technologies");
 
   // Register a wild-card for AIDs routed to the host
-  tNFA_STATUS nfaStat = NFA_CeRegisterAidOnDH(NULL, 0, stackCallback);
+  nfaStat = NFA_CeRegisterAidOnDH(NULL, 0, stackCallback);
   if (nfaStat != NFA_STATUS_OK)
     LOG(ERROR) << fn << "Failed to register wildcard AID for DH";
 
@@ -598,7 +598,8 @@ void RoutingManager::updateDefaultProtocolRoute() {
   tNFA_PROTOCOL_MASK protoMask = NFA_PROTOCOL_MASK_ISO_DEP;
   tNFA_STATUS nfaStat;
   if (mDefaultIsoDepRoute != NFC_DH_ID &&
-      isTypeATypeBTechSupportedInEe(mDefaultIsoDepRoute)) {
+      isTypeATypeBTechSupportedInEe(mDefaultIsoDepRoute |
+                                    NFA_HANDLE_GROUP_EE)) {
     nfaStat = NFA_EeClearDefaultProtoRouting(mDefaultIsoDepRoute, protoMask);
     nfaStat = NFA_EeSetDefaultProtoRouting(
         mDefaultIsoDepRoute, protoMask, mSecureNfcEnabled ? 0 : protoMask, 0,
@@ -661,7 +662,7 @@ void RoutingManager::updateDefaultRoute() {
   // Register zero lengthy Aid for default Aid Routing
   if (mDefaultEe != mDefaultIsoDepRoute) {
     if ((mDefaultEe != NFC_DH_ID) &&
-        (!isTypeATypeBTechSupportedInEe(mDefaultEe))) {
+        (!isTypeATypeBTechSupportedInEe(mDefaultEe | NFA_HANDLE_GROUP_EE))) {
       DLOG_IF(INFO, nfc_debug_enabled)
           << fn << ": mDefaultEE Doesn't support either Tech A/B. Returning...";
       return;
@@ -687,7 +688,7 @@ tNFA_TECHNOLOGY_MASK RoutingManager::updateEeTechRouteSetting() {
     return allSeTechMask;
 
   DLOG_IF(INFO, nfc_debug_enabled)
-      << fn << ": Number of EE is " << mEeInfo.num_ee;
+      << fn << ": Number of EE is " << (int)mEeInfo.num_ee;
 
   tNFA_STATUS nfaStat;
   for (uint8_t i = 0; i < mEeInfo.num_ee; i++) {
@@ -1089,7 +1090,7 @@ void RoutingManager::nfcFCeCallback(uint8_t event,
 
 bool RoutingManager::setNfcSecure(bool enable) {
   mSecureNfcEnabled = enable;
-  DLOG_IF(INFO, true) << "chi setNfcSecure NfcService " << enable;
+  DLOG_IF(INFO, true) << "setNfcSecure NfcService " << enable;
   return true;
 }
 
@@ -1135,7 +1136,7 @@ int RoutingManager::registerJniFunctions(JNIEnv* e) {
   static const char fn[] = "RoutingManager::registerJniFunctions";
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
   return jniRegisterNativeMethods(
-      e, "com/android/nfc/cardemulation/AidRoutingManager", sMethods,
+      e, "com/android/nfcstm/cardemulation/AidRoutingManager", sMethods,
       NELEM(sMethods));
 }
 

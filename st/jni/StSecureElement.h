@@ -225,7 +225,6 @@ class StSecureElement {
   static const unsigned int MAX_RESPONSE_SIZE = 1024;
   //    enum RouteSelection {NoRoute, DefaultRoute, SecElemRoute};
   enum RxEvtType { EvtTransmitData, EvtWtxRequest };
-  static const int MAX_NUM_EE = 4;  // max number of EE's
   static StSecureElement sSecElem;
   static const char* APP_NAME;
 
@@ -267,7 +266,8 @@ class StSecureElement {
   int mActualResponseSize;  // number of bytes in the response received from
                             // secure element
 
-  tNFA_EE_INFO mEeInfo[MAX_NUM_EE];  // actual size stored in mActualNumEe
+  tNFA_EE_INFO
+      mEeInfo[NFA_EE_MAX_EE_SUPPORTED];  // actual size stored in mActualNumEe
 
   SyncEvent mHciRegisterEvent;
   SyncEvent mEeSetModeEvent;

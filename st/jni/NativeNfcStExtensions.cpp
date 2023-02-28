@@ -25,7 +25,7 @@
 #include "StNfcJni.h"
 #include "StRawJni.h"
 
-#include "StCardEmulationEmbedded.h"
+#include "StNdefNfcee.h"
 
 using android::base::StringPrintf;
 extern bool nfc_debug_enabled;
@@ -202,38 +202,6 @@ static jboolean nativeNfcStExtensions_isSEConnected(JNIEnv *e, jobject,
                                                     jint HostID) {
   jboolean result = NfcStExtensions::getInstance().isSEConnected(HostID);
   return result;
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_startLoopback
-**
-** Description:     Connect to the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static jint nativeNfcStExtensions_loopback(JNIEnv *e, jobject) {
-  jint ret = NfcStExtensions::getInstance().handleLoopback();
-  return ret;
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_getHceUserProp
-**
-** Description:     Connect to the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static jint nativeNfcStExtensions_getHceUserProp(JNIEnv *e, jobject) {
-  uint32_t res = NfcStExtensions::getInstance().getHceUserProp();
-  return res;
 }
 
 /*******************************************************************************
@@ -563,44 +531,8 @@ static jboolean nativeNfcStExtensions_EnableSE(JNIEnv *e, jobject, jint se_id,
 ** Returns:         Handle of secure element.  values < 0 represent failure.
 **
 *******************************************************************************/
-static jboolean nativeNfcStExtensions_connectEE(JNIEnv *e, jobject,
-                                                jint cee_id) {
-  return StCardEmulationEmbedded::getInstance().connect(cee_id);
-}
-
-/*********************************************************************************
-** Function:        nativeNfcStExtensions_transceiveEE
-**
-** Description:     Get the list and status of pipes for a given host.
-**                  e: JVM environment.
-**                  o: Java object.
-**                  host_id: Host to investigate
-**
-** Returns:         Java object containing Pipes information
-**
-*******************************************************************************/
-static jbyteArray nativeNfcStExtensions_transceiveEE(JNIEnv *e, jobject,
-                                                     jint cee_id,
-                                                     jbyteArray data_cmd) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
-
-  uint8_t recvBuffer[1024];
-  uint16_t recvBufferActualSize = 0;
-  ScopedByteArrayRW bytes(e, data_cmd);
-  bool rslt = false;
-
-  rslt = StCardEmulationEmbedded::getInstance().transceive(
-      cee_id, bytes.size(), reinterpret_cast<uint8_t *>(&bytes[0]),
-      recvBufferActualSize, recvBuffer);
-
-  jbyteArray result = e->NewByteArray(recvBufferActualSize);
-  if (result != NULL) {
-    e->SetByteArrayRegion(result, 0, recvBufferActualSize, (jbyte *)recvBuffer);
-  }
-
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; exit: received data length =%d", __func__, recvBufferActualSize);
-  return result;
+static jboolean nativeNfcStExtensions_connectEE(JNIEnv *e, jobject) {
+  return StNdefNfcee::getInstance().connect();
 }
 
 /*******************************************************************************
@@ -614,77 +546,8 @@ static jbyteArray nativeNfcStExtensions_transceiveEE(JNIEnv *e, jobject,
 ** Returns:         Handle of secure element.  values < 0 represent failure.
 **
 *******************************************************************************/
-static jboolean nativeNfcStExtensions_disconnectEE(JNIEnv *e, jobject,
-                                                   jint cee_id) {
-  return StCardEmulationEmbedded::getInstance().disconnect(cee_id);
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_connectGate
-**
-** Description:     Connect/disconnect the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static jint nativeNfcStExtensions_connectGate(JNIEnv *e, jobject, jint host_id,
-                                              jint gate_id) {
-  jint result = NfcStExtensions::getInstance().connectGate(host_id, gate_id);
-  return result;
-}
-
-/*********************************************************************************
-** Function:        nativeNfcStExtensions_transceive
-**
-** Description:     Get the list and status of pipes for a given host.
-**                  e: JVM environment.
-**                  o: Java object.
-**                  host_id: Host to investigate
-**
-** Returns:         Java object containing Pipes information
-**
-*******************************************************************************/
-static jbyteArray nativeNfcStExtensions_transceive(JNIEnv *e, jobject,
-                                                   jint pipe_id, jint hciCmd,
-                                                   jbyteArray data_cmd) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
-
-  uint8_t recvBuffer[1024];
-  int32_t recvBufferActualSize = 0;
-  ScopedByteArrayRW bytes(e, data_cmd);
-  bool rslt = false;
-
-  rslt = NfcStExtensions::getInstance().transceive(
-      pipe_id, hciCmd, bytes.size(), reinterpret_cast<uint8_t *>(&bytes[0]),
-      recvBufferActualSize, recvBuffer);
-
-  jbyteArray result = e->NewByteArray(recvBufferActualSize);
-  if (result != NULL) {
-    e->SetByteArrayRegion(result, 0, recvBufferActualSize, (jbyte *)recvBuffer);
-  }
-
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; exit: received data length =%d", __func__, recvBufferActualSize);
-  return result;
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_disconnectGate
-**
-** Description:     Connect/disconnect the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static void nativeNfcStExtensions_disconnectGate(JNIEnv *e, jobject,
-                                                 jint pipe_id) {
-  NfcStExtensions::getInstance().disconnectGate(pipe_id);
+static jboolean nativeNfcStExtensions_disconnectEE(JNIEnv *e, jobject) {
+  return StNdefNfcee::getInstance().disconnect();
 }
 
 /*******************************************************************************
@@ -749,8 +612,8 @@ static jbyteArray nativeNfcStExtensions_getNciConfig(JNIEnv *e, jobject,
 static int nativeNfcStExtensions_getAvailableHciHostList(JNIEnv *e, jobject,
                                                          jbyteArray nfceeId,
                                                          jbyteArray conInfo) {
-  uint8_t nfceeIdArray[3];
-  uint8_t conInfoArray[3];
+  uint8_t nfceeIdArray[NFA_EE_MAX_EE_SUPPORTED];
+  uint8_t conInfoArray[NFA_EE_MAX_EE_SUPPORTED];
   int num = 0;
 
   num = NfcStExtensions::getInstance().getAvailableHciHostList(nfceeIdArray,
@@ -926,9 +789,9 @@ jbyteArray nativeNfcStExtensions_rawJniSeq(JNIEnv *e, jobject o, jint i,
 ** Returns:         NFCEE id of NDEF NFCEE is present, 0x00 otherwise
 **
 *******************************************************************************/
-static jint nativeNfcStExtensions_checkNdefNfceeAvailable(JNIEnv *e,
-                                                          jobject o) {
-  return StCardEmulationEmbedded::getInstance().checkNdefNfceeAvailable();
+static jboolean nativeNfcStExtensions_checkNdefNfceeAvailable(JNIEnv *e,
+                                                              jobject o) {
+  return StNdefNfcee::getInstance().checkNdefNfceeAvailable();
 }
 
 /*****************************************************************************
@@ -945,8 +808,6 @@ static JNINativeMethod gMethods[] = {
     {"isUiccConnected", "()Z", (void *)nativeNfcStExtensions_isUiccConnected},
     {"iseSEConnected", "()Z", (void *)nativeNfcStExtensions_iseSEConnected},
     {"isSEConnected", "(I)Z", (void *)nativeNfcStExtensions_isSEConnected},
-    {"loopback", "()I", (void *)nativeNfcStExtensions_loopback},
-    {"getHceUserProp", "()I", (void *)nativeNfcStExtensions_getHceUserProp},
     {"setRfConfiguration", "(I[B)V",
      (void *)nativeNfcStExtensions_setRfConfiguration},
     {"getRfConfiguration", "([B)I",
@@ -965,12 +826,8 @@ static JNINativeMethod gMethods[] = {
     {"getPipeInfo", "(II[B)V", (void *)nativeNfcStExtensions_getPipeInfo},
     {"getATR", "()[B", (void *)nativeNfcStExtensions_getAtr},
     {"EnableSE", "(IZ)Z", (void *)nativeNfcStExtensions_EnableSE},
-    {"connectEE", "(I)Z", (void *)nativeNfcStExtensions_connectEE},
-    {"transceiveEE", "(I[B)[B", (void *)nativeNfcStExtensions_transceiveEE},
-    {"disconnectEE", "(I)Z", (void *)nativeNfcStExtensions_disconnectEE},
-    {"connectGate", "(II)I", (void *)nativeNfcStExtensions_connectGate},
-    {"transceive", "(II[B)[B", (void *)nativeNfcStExtensions_transceive},
-    {"disconnectGate", "(I)V", (void *)nativeNfcStExtensions_disconnectGate},
+    {"connectEE", "()Z", (void *)nativeNfcStExtensions_connectEE},
+    {"disconnectEE", "()Z", (void *)nativeNfcStExtensions_disconnectEE},
     {"setNciConfig", "(I[BI)V", (void *)nativeNfcStExtensions_setNciConfig},
     {"getNciConfig", "(I)[B", (void *)nativeNfcStExtensions_getNciConfig},
     {"getAvailableHciHostList", "([B[B)I",
@@ -985,8 +842,9 @@ static JNINativeMethod gMethods[] = {
     {"rawRfAuth", "(Z)Z", (void *)nativeNfcStExtensions_rawRfAuth},
     {"rawRfMode", "(Z)Z", (void *)nativeNfcStExtensions_rawRfMode},
     {"rawJniSeq", "(I[B)[B", (void *)nativeNfcStExtensions_rawJniSeq},
-    {"checkNdefNfceeAvailable", "()I",
-     (void *)nativeNfcStExtensions_checkNdefNfceeAvailable}};
+    {"checkNdefNfceeAvailable", "()Z",
+     (void *)nativeNfcStExtensions_checkNdefNfceeAvailable},
+};
 
 /*******************************************************************************
 **

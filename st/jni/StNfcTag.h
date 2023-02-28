@@ -50,8 +50,6 @@ class NfcTag {
   int mTechListIndex;
   int mNumRfDiscId;
   bool mNfcDisableinProgress;
-  bool mCashbeeDetected;
-  bool mEzLinkTypeTag;
   activationParams_t mActivationParams_t;
 
   bool mWaitingForSelect;
@@ -428,28 +426,6 @@ class NfcTag {
 
   /*******************************************************************************
   **
-  ** Function:        isEzLinkTagActivated
-  **
-  ** Description:     checks if EzLinkTag tag is detected
-  **
-  ** Returns:         True if tag is activated.
-  **
-  *******************************************************************************/
-  bool isEzLinkTagActivated();
-
-  /*******************************************************************************
-  **
-  ** Function:        isCashBeeActivated
-  **
-  ** Description:     checks if cashbee tag is detected
-  **
-  ** Returns:         True if tag is activated.
-  **
-  *******************************************************************************/
-  bool isCashBeeActivated();
-
-  /*******************************************************************************
-  **
   ** Function:        storeActivationParams
   **
   ** Description:     stores tag activation parameters for backup
@@ -501,6 +477,8 @@ class NfcTag {
   **
   *******************************************************************************/
   void resetTechnologies();
+
+  void resetNdefDetectionTimedOut();
 
  private:
   std::vector<int> mTechnologyTimeoutsTable;

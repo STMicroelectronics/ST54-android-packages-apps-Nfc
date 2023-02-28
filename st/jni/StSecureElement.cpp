@@ -148,7 +148,6 @@ bool StSecureElement::initialize(nfc_jni_native_data* native) {
   mNfaHciHandle = NFA_HANDLE_INVALID;
 
   mNativeData = native;
-  mActualNumEe = MAX_NUM_EE;
   mbNewEE = true;
   memset(mEeInfo, 0, sizeof(mEeInfo));
 
@@ -226,11 +225,11 @@ void StSecureElement::finalize() {
 bool StSecureElement::getEeInfo() {
   static const char fn[] = "StSecureElement::getEeInfo";
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
-  tNFA_EE_INFO localEeInfo[MAX_NUM_EE];
+  tNFA_EE_INFO localEeInfo[NFA_EE_MAX_EE_SUPPORTED];
 
   // If mbNewEE is true then there is new EE info.
   if (mbNewEE) {
-    mActualNumEe = MAX_NUM_EE;
+    mActualNumEe = NFA_EE_MAX_EE_SUPPORTED;
     gMutexEE.lock();
     if ((nfaStat = NFA_EeGetInfo(&mActualNumEe, mEeInfo)) != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf("%s; fail get info; error=0x%X", fn, nfaStat);
@@ -563,7 +562,13 @@ bool StSecureElement::connectEE() {
         retVal = false;
         goto TheEnd;
       }
-      mApduReadAtrEvent.wait();  // Wait for ATR value
+      // Wait for WTX value
+      if (mApduReadAtrEvent.wait(5000) == false) {
+        LOG(ERROR) << StringPrintf(
+            "%s; timeout getting ATR bytes from APDU gate", fn);
+        retVal = false;
+        goto TheEnd;
+      }
 
       mTxWaitingTime = DEFAULT_TX_WAITING_TIME;
 
@@ -592,7 +597,12 @@ bool StSecureElement::connectEE() {
         retVal = false;
         goto TheEnd;
       }
-      mApduReadAtrEvent.wait();  // Wait for WTX value
+      // Wait for WTX value
+      if (mApduReadAtrEvent.wait(5000) == false) {
+        LOG(ERROR) << StringPrintf(
+            "%s; timeout getting ATR bytes from APDU gate", fn);
+        retVal = false;
+      }
     }
   } else {
     LOG_IF(INFO, nfc_debug_enabled)
@@ -907,7 +917,7 @@ void StSecureElement::notifyEeStatus(tNFA_HANDLE eeHandle, uint8_t status) {
         LOG(ERROR) << StringPrintf(
             "%s; Disable/Enable NFC service following eSE unrecoverable error",
             fn);
-        NfcStExtensions::getInstance().notifyRestart(true, false);
+        NfcStExtensions::getInstance().triggerNfcRestart(true, false);
       }
     } else {
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; pEE is NULL", fn);
@@ -945,6 +955,34 @@ void StSecureElement::abortWaits() {
   {
     SyncEventGuard g(mHostListEvent);
     mHostListEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mTransceiveEvent);
+    mTransceiveEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mApduInfoEvent);
+    mApduInfoEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mApduReadAtrEvent);
+    mApduReadAtrEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mPowerCtrlEvent);
+    mPowerCtrlEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mSeActivationEvent);
+    mSeActivationEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mCreatePipeEvent);
+    mCreatePipeEvent.notifyOne();
+  }
+  {
+    SyncEventGuard g(mOpenPipeEvent);
+    mOpenPipeEvent.notifyOne();
   }
 }
 
@@ -1386,7 +1424,7 @@ bool StSecureElement::EnableSE(int seID, bool enable) {
       << StringPrintf("%s; enter; seID=0x%X enable = %d", fn, seID, enable);
 
   gMutexEE.lock();
-  tNFA_EE_INFO localEeInfo[MAX_NUM_EE];
+  tNFA_EE_INFO localEeInfo[NFA_EE_MAX_EE_SUPPORTED];
   memcpy(&localEeInfo, &mEeInfo, sizeof(mEeInfo));
   gMutexEE.unlock();
 
@@ -1603,7 +1641,7 @@ int StSecureElement::retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo) {
   static const char fn[] = "StSecureElement::retrieveHostList()";
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   int i, idx = 0;
-  uint8_t lActualNumEe = MAX_NUM_EE;
+  uint8_t lActualNumEe = NFA_EE_MAX_EE_SUPPORTED;
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
   gMutexEE.lock();
@@ -1649,7 +1687,7 @@ uint8_t StSecureElement::getActiveNfcee(uint8_t defaultNfceeId) {
 
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
 
-  mActualNumEe = MAX_NUM_EE;
+  mActualNumEe = NFA_EE_MAX_EE_SUPPORTED;
 
   gMutexEE.lock();
   if ((nfaStat = NFA_EeGetInfo(&mActualNumEe, mEeInfo)) != NFA_STATUS_OK) {
@@ -1657,7 +1695,7 @@ uint8_t StSecureElement::getActiveNfcee(uint8_t defaultNfceeId) {
     mActualNumEe = 0;
   }
 
-  tNFA_EE_INFO localEeInfo[MAX_NUM_EE];
+  tNFA_EE_INFO localEeInfo[NFA_EE_MAX_EE_SUPPORTED];
   memcpy(&localEeInfo, &mEeInfo, sizeof(mEeInfo));
 
   gMutexEE.unlock();
@@ -1734,7 +1772,7 @@ uint8_t StSecureElement::getSENfceeId(uint8_t host_id) {
   uint8_t nfceeId = 0xff;
 
   gMutexEE.lock();
-  tNFA_EE_INFO localEeInfo[MAX_NUM_EE];
+  tNFA_EE_INFO localEeInfo[NFA_EE_MAX_EE_SUPPORTED];
   memcpy(&localEeInfo, &mEeInfo, sizeof(mEeInfo));
   gMutexEE.unlock();
 
@@ -1791,8 +1829,8 @@ uint8_t StSecureElement::getConnectedNfceeId(uint8_t id) {
   // If DH or unvalid value, use HCE
   uint8_t nciId = 0x00;
   uint8_t i;
-  uint8_t nfceeid[3];
-  uint8_t conInfo[3];
+  uint8_t nfceeid[NFA_EE_MAX_EE_SUPPORTED];
+  uint8_t conInfo[NFA_EE_MAX_EE_SUPPORTED];
   uint8_t num = retrieveHostList(nfceeid, conInfo);
 
   switch (id) {

@@ -12,9 +12,10 @@
      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
      See the License for the specific language governing permissions and
      limitations under the License.
+
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-        package="com.android.nfc"
+        package="com.android.nfcstm"
         android:sharedUserId="android.uid.nfc"
         android:sharedUserLabel="@string/nfcUserLabel"
 >
@@ -71,7 +72,7 @@
                  android:theme="@android:style/Theme.Material.Light"
                  android:persistent="true"
                  android:persistentWhenFeatureAvailable="android.hardware.nfc.any"
-                 android:backupAgent="com.android.nfc.NfcBackupAgent"
+                 android:backupAgent="com.android.nfcstm.NfcBackupAgent"
                  android:killAfterRestore="false"
                  android:usesCleartextTraffic="false"
                  android:supportsRtl="true"
@@ -163,7 +164,7 @@
             </intent-filter>
         </receiver>
 
-        <receiver android:name="com.android.nfc.st.NfcSimStateObserver"
+        <receiver android:name="com.android.nfcstm.st.NfcSimStateObserver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.SIM_STATE_CHANGED" />
@@ -172,7 +173,7 @@
 
         <receiver
             android:exported="false"
-            android:name="com.android.nfc.NfcService$NotificationBroadcastReceiver" />
+            android:name="com.android.nfcstm.NfcService$NotificationBroadcastReceiver" />
 
         <service android:name=".handover.PeripheralHandoverService"
         />
