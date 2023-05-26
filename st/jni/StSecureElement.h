@@ -214,9 +214,10 @@ class StSecureElement {
   bool EnableSE(int seID, bool enable);
   void SeActivationLock();
   void SeActivationUnlock();
-  int retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);
+  int retrieveHciHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);
   void resetEEInfo();
   uint8_t getSENfceeId(uint8_t host_id);
+  int retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);
 
   static const uint8_t UICC_IDX = 0x00;
   static const uint8_t ESE_IDX = 0x01;

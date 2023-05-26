@@ -85,27 +85,13 @@ typedef struct {
   bool propHciRsp;
 } tJNI_EVT_WAITING_LIST;
 
-typedef struct {
-  uint32_t hal;
-  uint32_t coreStack;
-} tJNI_TRACE_CONFIG;
-
 class NfcStExtensions {
  public:
-  static const uint16_t DUMMY_SYTEM_PROP_VALUE = 0xFFFF;
-
-  static const uint8_t CRC_CONFIG_SIZE = 4;
   static const uint8_t FW_VERSION_SIZE = 4;
   static const uint8_t HW_VERSION_SIZE = 2;
 
   static const uint8_t UICC_HOST_ID = 0x02;
-  static const uint8_t UICC2_HOST_ID = 0x80;
-  static const uint8_t DH_HOST_ID = 0x00;
   static const uint8_t ESE_HOST_ID = 0xC0;
-
-  static const uint8_t NFCEE_ID_UICC1 = 0x81;
-  static const uint8_t NFCEE_ID_ESE = 0x82;
-  static const uint8_t NFCEE_ID_UICC2 = 0x83;
 
   static const uint8_t READER_IDX = 0;
   static const uint8_t CE_IDX = 1;
@@ -133,6 +119,13 @@ class NfcStExtensions {
 
   bool mIsEseSyncId;
   bool mIsEseReset;
+
+  // WA for the eSE activation
+  bool mEseCardBOnlyIsAllowed;
+  bool mEseActivationOngoing;
+  bool mIsEseActiveForWA;
+  int mDynT1Threshold;
+  static int sRfDynParamSet;
 
   void setCoreResetNtfInfo(uint8_t* ptr_manu_info);
   void initializeRfConfig();
@@ -192,42 +185,6 @@ class NfcStExtensions {
 
   /*******************************************************************************
    **
-   ** Function:        setDefaultOffHostRoute
-   **
-   ** Description:     Set the default off host route for HCE
-   **                  Is part of ST Extensions.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  void setDefaultOffHostRoute(int route);
-
-  /*******************************************************************************
-   **
-   ** Function:        getDefaultOffHostRoute
-   **
-   ** Description:     Get the default off host route for HCE
-   **                  Is part of ST Extensions.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  int getDefaultOffHostRoute();
-
-  /*******************************************************************************
-   **
-   ** Function:        getNfcSystemProp
-   **
-   ** Description:     Retrieve requested system property value.
-   **                  Is part of ST Extensions.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  uint32_t getNfcSystemProp(const char* key_id);
-
-  /*******************************************************************************
-   **
    ** Function:        getFwInfo
    **
    ** Description:     Retrieve the FW informations:
@@ -252,17 +209,6 @@ class NfcStExtensions {
    **
    *******************************************************************************/
   int getFirmwareVersion(uint8_t* fwVersion);
-
-  /*******************************************************************************
-   **
-   ** Function:        getCRCConfiguration
-   **
-   ** Description:     Retrieves the CRC configuration
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  int getCRCConfiguration(uint8_t* crcConfig);
 
   /*******************************************************************************
    **
@@ -301,19 +247,6 @@ class NfcStExtensions {
 
   /*******************************************************************************
    **
-   ** Function:        prepareGateForTest
-   **
-   ** Description:     Prepares the gate to be used:
-   **                  - Create if not yet created
-   **                  - Open if not yet openned
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  int prepareGateForTest(uint8_t gate_id, uint8_t host_id);
-
-  /*******************************************************************************
-   **
    ** Function:        checkGateForHostId
    **
    ** Description:     Checks if a pipe exists on the specified gate between
@@ -324,17 +257,6 @@ class NfcStExtensions {
    **
    *******************************************************************************/
   uint8_t checkGateForHostId(uint8_t gate_id, uint8_t host_id);
-
-  /*******************************************************************************
-   **
-   ** Function:        setNfcSystemProp
-   **
-   ** Description:     Sets the given system property to the given key value
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  void setNfcSystemProp(const char* key_id, const char* key_value);
 
   /*******************************************************************************
    **
@@ -370,8 +292,6 @@ class NfcStExtensions {
    **
    *******************************************************************************/
   int getRfConfiguration(uint8_t* techArray);
-
-  void setRfBitmap(int modeBitmap);
 
   /*******************************************************************************
    **
@@ -563,21 +483,6 @@ class NfcStExtensions {
 
   /*******************************************************************************
    **
-   ** Function:        setNfccPowerMode
-   **
-   ** Description:     Set the host power mode to the NFCC.
-   **                  transport : Transport action to perform :
-   **                             0x0 : Keep the NCI DH connected.
-   **                             0x4 : Disconnect transport interface..
-   **                  powermode: Host power mode
-   **
-   ** Returns:
-   **
-   *******************************************************************************/
-  bool checkListenAPassiveOnSE();
-
-  /*******************************************************************************
-   **
    ** Function:        getAvailableHciHostList
    **
    ** Description:     Get the available Nfcee Id and their status.
@@ -588,6 +493,8 @@ class NfcStExtensions {
    **
    *******************************************************************************/
   int getAvailableHciHostList(uint8_t* nfceeId, uint8_t* conInfo);
+
+  int getAvailableNfceeList(uint8_t* nfceeId, uint8_t* conInfo);
 
   void setNciConfig(int param_id, uint8_t* param, int length);
   void getNciConfig(int param_id, uint8_t* param, uint16_t& length);
@@ -631,17 +538,6 @@ class NfcStExtensions {
 
   /*******************************************************************************
    **
-   ** Function:        StLogManagerEnable
-   **
-   ** Description:    Enable / disable collection of the firmware logs
-   **
-   ** Returns:         void
-   **
-   *******************************************************************************/
-  void StLogManagerEnable(bool enable);
-
-  /*******************************************************************************
-   **
    ** Function:        rotateRfParameters
    **
    ** Description:    Change the default RF settings by rotating in available
@@ -653,28 +549,6 @@ class NfcStExtensions {
   static bool rotateRfParameters(bool reset);
 
   bool needStopDiscoveryBeforerotateRfParameters();
-
-  /*******************************************************************************
-   **
-   ** Function:        StActionNtfEnable
-   **
-   ** Description:    Enable / disable collection of RF_NFCEE_ACTION_NTF
-   **
-   ** Returns:         void
-   **
-   *******************************************************************************/
-  void StActionNtfEnable(bool enable);
-
-  /*******************************************************************************
-  **
-  ** Function:        StAidTriggerActionCallback
-  **
-  ** Description:     Called when RF_NFCEE_ACTION_NTF was received
-  **
-  ** Returns:         None
-  **
-  *******************************************************************************/
-  void StAidTriggerActionCallback(tNFA_EE_ACTION& action);
 
   /*******************************************************************************
   **
@@ -700,31 +574,7 @@ class NfcStExtensions {
   bool sendRawRfCmd(int cmdId, bool enable);
   bool getExtRawMode();
 
-  /*******************************************************************************
-  **
-  ** Function:        notifyIntfActivatedEvent
-  **
-  ** Description:     Called when RF_INTF_ACTIVATED_NTF was received
-  **
-  ** Returns:         None
-  **
-  *******************************************************************************/
-  void StIntfActivatedNtfEnable(bool enable);
-  void notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata);
-
   bool getIsRecovery();
-
-  /*******************************************************************************
-   **
-   ** Function:        stPollingLoopSpyManagerEnable
-   **
-   ** Description:    Enable / disable collection of the readers polling loop
-   *data
-   **
-   ** Returns:         void
-   **
-   *******************************************************************************/
-  void stPollingLoopSpyManagerEnable(bool enable);
 
   bool setObserverMode(bool enable);
   bool getObserverMode();
@@ -745,8 +595,6 @@ class NfcStExtensions {
   static const uint8_t NFCC_CONFIGURATION = 0x01;
   static const uint8_t HW_CONFIGURATION = 0x02;
   static const uint8_t TEST_CONFIGURATION = 0x11;
-  static const uint8_t NFCC_CONFIGURATION_REG_SIZE = 0x05;
-  static const uint8_t TEST_CONFIGURATION_REG_SIZE = 0x1C;
 
   static const uint8_t ID_MGMT_GATE_ID = 0x05;
   static const uint8_t CLF_ID = 0x00;
@@ -783,7 +631,6 @@ class NfcStExtensions {
 
   tJNI_VDC_MEAS_CONFIG mVdcMeasConfig;
   tJNI_ID_MGMT_INFO mIdMgmtInfo;
-  uint8_t mCrcConfig[CRC_CONFIG_SIZE];
   uint8_t mFwVersion[FW_VERSION_SIZE];
   uint16_t mRspSize;
   tJNI_RF_CONFIG mRfConfig;
@@ -805,11 +652,8 @@ class NfcStExtensions {
   int mDesiredScreenOffPowerState;  // read from .conf file; 0=power-off-sleep;
                                     // 1=full power; 2=CE4 power
 
-  tJNI_TRACE_CONFIG mTraceConfig;
-
   bool mIsP2pPaused;
 
-  uint8_t mSentHciCmd;
   uint16_t mRxHciDataLen;
   uint8_t mRxHciData[1024];
   uint8_t mCreatedPipeId;
@@ -818,131 +662,12 @@ class NfcStExtensions {
 
   static NfcStExtensions sStExtensions;
 
-  void StHandleVsLogData(uint16_t data_len, uint8_t* p_data);
   void StHandleDetectionFOD(uint8_t FodReason);
-
-  SyncEvent mVsLogDataEvent;
-  bool mSendVsLogDataToUpper;
-  bool mSendNfceeActionNtfToUpper;
-  bool mSendIntfActivatedNtfToUpper;
-
-  static int sRfDynParamSet;
-
-  // Variables for dynamic params state machine
-  bool mDynEnabled;
-  int mDynFwState;
-#define DYN_ST_INITIAL 0
-#define DYN_ST_T1_RUNNING 1
-#define DYN_ST_ACTIVE 2
-#define DYN_ST_T1_IN_ROTATION 3
-#define DYN_ST_T1_ROTATION_DONE 4
-  int mDynFwSubState;
-#define DYN_SST_IDLE 0
-#define DYN_SST_STARTED 1
-  int mDynFwErr;
-  int mDynRotated;
-  int mDynRotatedByFw;
-  uint32_t mDynFwTsT1Started;  // FW time reference for T1
-  uint32_t mDynFwTsT2Started;  // FW time reference for T2
-  int mDynErrThreshold;
-  int mDynParamsCycles;
-  int mDynT1Threshold;
-  int mDynT2Threshold;
 
   int mHostListenTechMask;
 
-  int FwTsDiffToMs(uint32_t fwtsstart, uint32_t fwtsend);
-  void StHandleLogDataDynParams(uint8_t format, uint16_t data_len,
-                                uint8_t* p_data, bool last);
   SyncEvent mDynRotateFieldEvt;
   bool mDynRotateFieldSts;
-
-  // Variables for matching SELECT and SW
-  SyncEvent mMatchSelectLock;
-  int mMatchSelectState;
-#define MATCH_SEL_ST_INITIAL 0
-#define MATCH_SEL_ST_GOT_1stRX 1
-#define MATCH_SEL_ST_CE_IN_ISODEP 2
-#define MATCH_SEL_ST_CE_GOT_SELECT 3
-  void StMatchSelectSw(uint8_t format, uint16_t data_len, uint8_t* p_data,
-                       bool last);
-  void StMatchStoreActionAid(uint8_t nfcee, uint8_t* aid, int len);
-  void StMatchGotLogPartialAid(uint8_t* aidBeg, int aidBegLen, uint8_t* aidEnd,
-                               int aidEndLen, int fullLen);
-  void StMatchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2);
-  void StMatchPurgeActionAid(int num, bool skipLast);
-  void StMatchSendTriggerPayload(uint8_t nfcee, uint8_t* buf, int len);
-  // queue of the AID triggers we received
-#define MATCH_SEL_QUEUE_LEN 5
-  int mMatchSelectedAidNfcee[MATCH_SEL_QUEUE_LEN];  // received in ACTION_NTF
-  int mMatchSelectedAidLen[MATCH_SEL_QUEUE_LEN];    // received in ACTION_NTF
-  uint8_t
-      mMatchSelectedAid[16 * MATCH_SEL_QUEUE_LEN];  // received in ACTION_NTF
-  int mMatchSelectedCurrent;  // number of entries in above.
-  // Store AID found in fw log TLV & SW until NCI ntf is received.
-  int mMatchSelectPartialCurrent;  // number of entries in below (SW already
-                                   // received).
-  int mMatchSelectPartialOrigLen[MATCH_SEL_QUEUE_LEN];       // fw log
-  int mMatchSelectPartialAidBegLen[MATCH_SEL_QUEUE_LEN];     // fw log
-  int mMatchSelectPartialAidEndLen[MATCH_SEL_QUEUE_LEN];     // fw log
-  uint8_t mMatchSelectPartialAid[16 * MATCH_SEL_QUEUE_LEN];  // fw log Beg + End
-  uint8_t mMatchSelectPartialLastChainedByte;                // fw log
-  uint8_t mMatchSelectPartialSw[2 * MATCH_SEL_QUEUE_LEN];  // 00 00 if no value
-                                                           // stored.
-  uint32_t mMatchSelectLastFieldOffTs;
-
-  bool needMatchSwForNfceeActionNtf();
-
-  // Variables for sending 1st Rx and parameters rotation to service
-  // only once between a field on and off, unless the values change
-  int mSend1stRxFlags;
-  uint8_t mSend1stRxTech;
-  uint8_t mSend1stRxParam;
-#define SEND_1ST_RX_SENTTECH 1
-#define SEND_1ST_RX_SENTPARAM 2
-#define SEND_1ST_RX_SENTSC 4
-  void StSend1stRxAndRfParam(uint8_t format, uint16_t data_len, uint8_t* p_data,
-                             bool last);
-
-  bool mIsEseActiveForWA;
-  // WA for the eSE activation
-  bool mEseCardBOnlyIsAllowed;
-  bool mEseActivationOngoing;
-  void StMonitorSeActivation(uint8_t format, uint16_t data_len, uint8_t* p_data,
-                             bool last);
-
-  int mStMonitorSeActivationState;
-#define STMONITORSTATE_INITIAL 0
-#define STMONITORSTATE_GOT_CLEAR_ALL_PIPES 1
-#define STMONITORSTATE_GOT_PARAM_A 2
-
-  // WA to check eSE is not in bad state (older versions)
-  void StEseMonitor(uint8_t format, uint16_t data_len, uint8_t* p_data,
-                    bool last);
-  // check if same frame is sent 3 times.
-  int mLastSentLen;
-  uint8_t mLastSent[5];
-  int mLastSentCounter;
-  // check if receive same param twice.
-  int mLastReceivedParamLen;
-  uint8_t mLastReceivedParam[30];
-  bool mLastReceivedIsFrag[4];  // index: pipes 21~24.
-
-  // WA to check CLF is not stuck for missing a field off event
-  void StClfFieldMonitor(uint8_t format, uint16_t data_len, uint8_t* p_data,
-                         bool last);
-  bool mStClfFieldMonitorInRemoteField;
-  bool mStClfFieldMonitorInRemoteFieldPrev;
-  SyncEvent mStClfFieldMonitorSync;  // signaled for every fw log while in field
-                                     // on, and when go to field off.
-  pthread_t mStClfFieldMonitorThread;
-  static void* StClfFieldMonitorWorker(NfcStExtensions* inst);
-
-  // WA to check if eSE ignored a CLT frame and restart so we are not stuck.
-  void StCltMuteMonitor(uint8_t format, uint16_t data_len, uint8_t* p_data,
-                        bool last);
-  bool mSwpCltSent;
-  static void* StCltMuteMonitorWorker(NfcStExtensions* inst);
 
   // Constants for SetMuteTech
 #define ST_CE_MUTE_A 1
@@ -956,46 +681,11 @@ class NfcStExtensions {
   bool mIsExtRawMode;
 
   bool mIsRecovery;
-  bool mCollectReaderPollingLoopData;
-#define RPL_OBSERVER_DURATION_MS 100
-#define RPL_OBSERVER_RESET_S 2
-  // state machine of the algorithm
-  int mRPLState;
-#define RPL_ST_OBSERVER 0
-#define RPL_ST_TRANSACT 1
-  // Log parsing will notify the thread on each:
-  // - field on
-  // - field off
-  // - discovery stopped
-  // - unregistering, need to stop.
-  // The thread manages the transitions of the state machine.
-  SyncEvent mRPLSync;
-  uint32_t mRPLLastFieldOnTs;    // FW time reference
-  uint32_t mRPLLastFieldOffTs;   // FW time reference
-  uint32_t mRPLLastDiscoStopTs;  // FW time reference
-  bool mRPLUnregistering;
-  pthread_t mRPLThread;
-  static void* RPLWorker(NfcStExtensions* inst);
-// Events to build the string for service while state RPL_ST_OBSERVER
-// - only if mRPLNbEvents < 50
-// - and mRPLLastEventTs > mRPLLastDiscoStopTs
-#define RPL_MAX_EVENTS 50
-#define RPL_STR_MAXLEN ((RPL_MAX_EVENTS * (3 + 1 + 6 + 1)) + 1)
-  char* mRPLString;
-  int mRPLStringIndex;
-  int mRPLNbEvents;
-  uint32_t mRPLLastEventTs;  // FW time reference
 
   bool mIsObserverMode;
   bool needUnmuteTechForObserverMode();
 
   static void notifyRestart();
-
-  void StRPLAddOneEventLocked(char type, uint8_t gain, uint32_t ts);
-
-  int FwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend);
-  void StHandlePollingLoopData(uint8_t format, uint16_t data_len,
-                               uint8_t* p_data, bool last);
 
   /*******************************************************************************
    **

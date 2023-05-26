@@ -524,7 +524,7 @@ bool StSecureElement::connectEE() {
   LOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; enter, Active eSE ID(nfceeId): 0x%04x", fn, nfceeId);
 
-  android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, true);
+  // android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, true);
 
   // Check if and which APDU gate is available
   if (getApduSettings() == false) {
@@ -632,8 +632,8 @@ bool StSecureElement::disconnectEE(jint seID) {
   LOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; seID=0x%X; handle=0x%04x", fn, seID, eeHandle);
 
-  // Sent EVT_END_OF_APDU_TRANSFER to eSE => no answer awaited
-  android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, false);
+  // // Sent EVT_END_OF_APDU_TRANSFER to eSE => no answer awaited
+  // android::stNfcManager_doSetNfceePowerAndLinkCtrl(NULL, NULL, false);
 
   mIsPiping = false;
   return true;
@@ -1628,17 +1628,18 @@ tNFA_STATUS StSecureElement::handleEnableSESeq(tNFA_EE_INFO* eeItem,
 
 /*******************************************************************************
  **
- ** Function:        retrieveHostList
+ ** Function:        retrieveHciHostList
  **
- ** Description:    retrieveHostLists from stack.
+ ** Description:    retrieveHciHostLists from stack.
  **                  connEvent: Event code.
  **                  eventData: Event data.
  **
  ** Returns:         None
  **
  *******************************************************************************/
-int StSecureElement::retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo) {
-  static const char fn[] = "StSecureElement::retrieveHostList()";
+int StSecureElement::retrieveHciHostList(uint8_t* ptrHostList,
+                                         uint8_t* ptrInfo) {
+  static const char fn[] = "StSecureElement::retrieveHciHostList()";
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
   int i, idx = 0;
   uint8_t lActualNumEe = NFA_EE_MAX_EE_SUPPORTED;
@@ -1656,6 +1657,39 @@ int StSecureElement::retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo) {
       ptrInfo[idx] = mEeInfo[i].ee_status;
       idx++;
     }
+  }
+  gMutexEE.unlock();
+  return idx;
+}
+
+/*******************************************************************************
+ **
+ ** Function:        retrieveHostList
+ **
+ ** Description:    retrieveHostList from stack.
+ **                  connEvent: Event code.
+ **                  eventData: Event data.
+ **
+ ** Returns:         None
+ **
+ *******************************************************************************/
+int StSecureElement::retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo) {
+  static const char fn[] = "StSecureElement::retrieveHciHostList()";
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
+  int i, idx = 0;
+  uint8_t lActualNumEe = NFA_EE_MAX_EE_SUPPORTED;
+
+  tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
+  gMutexEE.lock();
+  if ((nfaStat = NFA_EeGetInfo(&lActualNumEe, mEeInfo)) != NFA_STATUS_OK) {
+    LOG(ERROR) << StringPrintf("%s; fail get info; error=0x%X", fn, nfaStat);
+    gMutexEE.unlock();
+    return 0;
+  }
+  for (i = 0; i < lActualNumEe; i++) {
+    ptrHostList[idx] = mEeInfo[i].ee_handle & ~NFA_HANDLE_GROUP_EE;
+    ptrInfo[idx] = mEeInfo[i].ee_status;
+    idx++;
   }
   gMutexEE.unlock();
   return idx;
@@ -1831,11 +1865,11 @@ uint8_t StSecureElement::getConnectedNfceeId(uint8_t id) {
   uint8_t i;
   uint8_t nfceeid[NFA_EE_MAX_EE_SUPPORTED];
   uint8_t conInfo[NFA_EE_MAX_EE_SUPPORTED];
-  uint8_t num = retrieveHostList(nfceeid, conInfo);
+  uint8_t num = retrieveHciHostList(nfceeid, conInfo);
 
   switch (id) {
     case 0x10:
-      // retrieveHostList filters out NDEF-NFCEE; we just assume it is
+      // retrieveHciHostList filters out NDEF-NFCEE; we just assume it is
       // connected.
       nciId = 0x10;
       break;

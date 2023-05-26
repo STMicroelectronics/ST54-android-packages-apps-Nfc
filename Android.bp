@@ -43,8 +43,11 @@ android_app {
 	],
 
     static_libs: [
+        "android.se.omapi-V1-java",
+        "androidx.annotation_annotation",
         "androidx.appcompat_appcompat",
         "com.google.android.material_material",
+        "PlatformProperties",
     ],
 
     optimize: {

@@ -67,7 +67,6 @@ public class NfcAddonWrapper implements ISeController.Callback {
     public void applyInitializeSequence() {
         PackageManager pm = mContext.getPackageManager();
         boolean isHceCapable = pm.hasSystemFeature(PackageManager.FEATURE_NFC_HOST_CARD_EMULATION);
-        boolean isBeamCapable = pm.hasSystemFeature(PackageManager.FEATURE_NFC_BEAM);
 
         boolean isHceOn = false;
 
@@ -85,20 +84,16 @@ public class NfcAddonWrapper implements ISeController.Callback {
         }
 
         Log.d(TAG, "applyInitializeSequence() - isHceOn = " + isHceOn);
-        Log.d(TAG, "applyInitializeSequence() - isBeamCapable = " + isBeamCapable);
         // Settings.Global.NFC_HCE_ON to "nfc_hce_on"
         int mode = 0;
         if (mPrefs.getInt(PREF_MODE_READER, NfcSettingsAdapter.FLAG_ON)
                 == NfcSettingsAdapter.FLAG_ON) {
             mode |= NfcSettingsAdapter.MODE_READER;
         }
-        if ((mPrefs.getInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_ON) == NfcSettingsAdapter.FLAG_ON)
-                && (isBeamCapable)) {
-            mode |= NfcSettingsAdapter.MODE_P2P;
-        } else {
-            mPrefsEditor.putInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_OFF);
-            mPrefsEditor.apply();
-        }
+
+        mPrefsEditor.putInt(PREF_MODE_P2P, NfcSettingsAdapter.FLAG_OFF);
+        mPrefsEditor.apply();
+
         if (isHceOn) {
             mode |= NfcSettingsAdapter.MODE_HCE;
         }
@@ -122,13 +117,8 @@ public class NfcAddonWrapper implements ISeController.Callback {
             modeBitmap &= ~0x2;
         }
 
-        if ((mode & NfcSettingsAdapter.MODE_P2P) != 0) {
-            modeBitmap |= 0x4; // listen
-            modeBitmap |= 0x8; // poll
-        } else {
-            modeBitmap &= ~0x4;
-            modeBitmap &= ~0x8;
-        }
+        modeBitmap &= ~0x4;
+        modeBitmap &= ~0x8;
 
         mStExtensions.setRfConfiguration(modeBitmap, techArray);
     }
@@ -212,7 +202,10 @@ public class NfcAddonWrapper implements ISeController.Callback {
 
         // Retrieve current RfConfiguration
         byte[] techArray = new byte[4];
-        int modeBitmap = mStExtensions.getRfConfiguration(techArray);
+        int modeBitmap = 0x00;
+        if (isNfcEnabled) {
+            modeBitmap = mStExtensions.getRfConfiguration(techArray);
+        }
 
         synchronized (syncObj) {
             if ((mode

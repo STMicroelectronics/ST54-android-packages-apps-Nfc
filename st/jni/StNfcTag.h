@@ -21,6 +21,7 @@
 #pragma once
 #include <vector>
 #include "StNfcJni.h"
+#include "NfcStatsUtil.h"
 #include "SyncEvent.h"
 
 #include "nfa_rw_api.h"
@@ -501,6 +502,7 @@ class NfcTag {
   bool mIsFelicaLite;
   bool mIsP2pDetectedButPaused;
   bool mIsSkipMifare;
+  NfcStatsUtil* mNfcStatsUtil;
 
   /*******************************************************************************
   **

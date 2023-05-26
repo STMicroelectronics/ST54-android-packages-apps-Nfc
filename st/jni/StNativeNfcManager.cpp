@@ -40,6 +40,7 @@
 #include "StNdefNfcee.h"
 #include "PowerSwitch.h"
 #include "StRoutingManager.h"
+#include "StFwNtfManager.h"
 #include "IntervalTimer.h"
 #include "SyncEvent.h"
 #include "nfc_config.h"
@@ -184,9 +185,10 @@ SyncEvent sNfaDisableEvent;  // event for NFA_Disable()
 static SyncEvent sNfaEnableDisablePollingEvent;  // event for
                                                  // NFA_EnablePolling(),
                                                  // NFA_DisablePolling()
-SyncEvent gNfaSetConfigEvent;                    // event for Set_Config....
-SyncEvent gNfaGetConfigEvent;                    // event for Get_Config....
-static SyncEvent stimer;  // timer to try to enable again  NFA_Enable()
+static SyncEvent sNfaEnableDisableListeningEvent;
+SyncEvent gNfaSetConfigEvent;  // event for Set_Config....
+SyncEvent gNfaGetConfigEvent;  // event for Get_Config....
+static SyncEvent stimer;       // timer to try to enable again  NFA_Enable()
 static bool sIsNfaEnabled = false;
 static bool sDiscoveryEnabled = false;  // is polling or listening
 static bool sPollingEnabled = false;    // is polling for tag?
@@ -234,12 +236,23 @@ static void nfcManager_isSkipMifareInterface();
 /***P2P-Prio Logic for Multiprotocol***/
 static uint8_t multiprotocol_flag = 1;
 static uint8_t multiprotocol_detected = 0;
-void* p2p_prio_logic_multiprotocol(void* arg);
-static IntervalTimer multiprotocol_timer;
-pthread_t multiprotocol_thread;
-void reconfigure_poll_cb(union sigval);
-void clear_multiprotocol();
-void multiprotocol_clear_flag(union sigval);
+
+#define PRIO_ISO_DET_INIT 0x00
+#define PRIO_ISO_MIFARE_DET 0x01
+#define PRIO_ISO_TYPE_BF_DET 0x02
+#define PRIO_ISO_NO_TYPE_BF_DET 0x04
+
+static uint8_t prio_iso_det_bitmap = PRIO_ISO_DET_INIT;
+static bool prio_iso_listen_disabled = false;
+static bool prio_iso_enabled = false;
+
+void* prio_logic_poll_reconf(void* arg);
+static IntervalTimer poll_reconf_timer;
+pthread_t poll_reconf_thread;
+void restore_poll_cb(union sigval);
+void start_poll_reconf_thread();
+
+void poll_reconf_clear_flag();
 
 uint16_t gCurrentConfigLen;
 uint8_t gConfig[256];
@@ -262,6 +275,9 @@ static bool gEnableSkipMifare;
 static void (*rawRfCb)(uint8_t, tNFA_CONN_EVT_DATA*);
 
 Mutex gMutexConfig;
+
+// Timestamp for start/stop discovery
+struct timespec mRfDiscTime = {.tv_sec = 0, .tv_nsec = 0};
 
 /////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////
@@ -330,7 +346,7 @@ nfc_jni_native_data* getNative(JNIEnv* e, jobject o) {
 **
 *******************************************************************************/
 static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
-  int thread_ret;
+  // int thread_ret;
   if (NULL == discoveredDevice) {
     LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
         "%s; parameter discoveredDevice can not be null error", __func__);
@@ -425,7 +441,7 @@ static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; Select peer device", __func__);
     if (multiprotocol_detected == 1) {
-      multiprotocol_timer.kill();
+      poll_reconf_timer.kill();
     }
 
     NfcTag::getInstance().selectP2p();
@@ -450,22 +466,12 @@ static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
     multiprotocol_detected = 1;
 
     nativeNfcTag_setP2pPrioLogic(true);
+    start_poll_reconf_thread();
 
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; starting p2p prio logic for multiprotocol tags", __func__);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    thread_ret = pthread_create(&multiprotocol_thread, &attr,
-                                p2p_prio_logic_multiprotocol, NULL);
-    if (thread_ret != 0)
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; unable to create the thread", __FUNCTION__);
-    pthread_attr_destroy(&attr);
     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
         "%s; starting timer for reconfigure default polling callback",
         __func__);
-    multiprotocol_timer.set(300, reconfigure_poll_cb);
+    poll_reconf_timer.set(300, restore_poll_cb);
   } else {
     // select the first of multiple tags that is discovered
     multiprotocol_flag = 1;
@@ -493,14 +499,53 @@ static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
 
 /*******************************************************************************
 **
-** Function:        p2p_prio_logic_multiprotocol
+** Function:        stNfcManager_configNfccConfigControl
+**
+** Description:     Turn on NFC.
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         True if ok.
+**
+*******************************************************************************/
+static void stNfcManager_configNfccConfigControl(bool flag) {
+  DLOG_IF(INFO, nfc_debug_enabled)
+      << StringPrintf("%s; flag: %d", __func__, flag);
+
+  // configure NFCC_CONFIG_CONTROL- NFCC allowed to manage RF configuration.
+  if (NFC_GetNCIVersion() != NCI_VERSION_1_0) {
+    uint8_t nfa_set_config[] = {0x00};
+
+    nfa_set_config[0] = (flag == true ? 1 : 0);
+
+    gNfccConfigControlStatus = flag;
+
+    gMutexConfig.lock();
+    SyncEventGuard guard(gNfaSetConfigEvent);
+
+    tNFA_STATUS status =
+        NFA_SetConfig(NCI_PARAM_ID_NFCC_CONFIG_CONTROL, sizeof(nfa_set_config),
+                      &nfa_set_config[0]);
+
+    if (status != NFA_STATUS_OK) {
+      LOG(ERROR) << __func__ << ": Failed to configure NFCC_CONFIG_CONTROL";
+    } else {
+      gNfaSetConfigEvent.wait();
+    }
+    gMutexConfig.unlock();
+  }
+}
+
+/*******************************************************************************
+**
+** Function:        prio_logic_poll_reconf
 **
 ** Description:
 **
 ** Returns:         None
 **
 *******************************************************************************/
-void* p2p_prio_logic_multiprotocol(void* arg) {
+void* prio_logic_poll_reconf(void* arg) {
   tNFA_STATUS status = NFA_STATUS_FAILED;
   tNFA_TECHNOLOGY_MASK tech_mask = 0x00;
   bool wasStopped = false;
@@ -512,8 +557,6 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
         << StringPrintf("%s; Disabling, do not execute", __func__);
     gIsReconfiguringDiscovery.end();
     return NULL;
-  } else {
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
   }
 
   /* Stop polling */
@@ -536,12 +579,47 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; configure polling to tech F only", __func__);
     tech_mask = NFA_TECHNOLOGY_MASK_F;
+  } else if (prio_iso_det_bitmap == PRIO_ISO_MIFARE_DET) {
+    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s; Mifare detected, configure polling to tech B/F only, disable "
+        "listen",
+        __func__);
+    tech_mask = NFA_TECHNOLOGY_MASK_B | NFA_TECHNOLOGY_MASK_F;
+
+    // Disable Listening and merge mode
+    {
+      SyncEventGuard guard(sNfaEnableDisableListeningEvent);
+      if ((status = NFA_DisableListening()) == NFA_STATUS_OK) {
+        // wait for NFA_LISTEN_DISABLED_EVT
+        sNfaEnableDisableListeningEvent.wait();
+        stNfcManager_configNfccConfigControl(false);
+        prio_iso_listen_disabled = true;
+      } else {
+        LOG(ERROR) << StringPrintf(
+            "%s; NFA_DisableListening() failed; error=0x%X", __func__, status);
+      }
+    }
   } else {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; re-configure polling to default", __func__);
 
+    if (prio_iso_listen_disabled) {
+      // Disable Listening and merge mode
+      SyncEventGuard guard(sNfaEnableDisableListeningEvent);
+      if ((status = NFA_EnableListening()) == NFA_STATUS_OK) {
+        // wait for NFA_LISTEN_DISABLED_EVT
+        sNfaEnableDisableListeningEvent.wait();
+      } else {
+        LOG(ERROR) << StringPrintf(
+            "%s; NFA_EnableListening() failed; error=0x%X", __func__, status);
+      }
+      stNfcManager_configNfccConfigControl(true);
+      prio_iso_listen_disabled = false;
+    }
+
     tech_mask =
         NfcConfig::getUnsigned(NAME_POLLING_TECH_MASK, DEFAULT_TECH_MASK);
+
     if (gIsDtaEnabled == true) {
       tech_mask &= ~NFA_TECHNOLOGY_MASK_ACTIVE;
       DLOG_IF(INFO, nfc_debug_enabled)
@@ -554,8 +632,6 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
     SyncEventGuard guard(sNfaEnableDisablePollingEvent);
     status = NFA_EnablePolling(tech_mask);
     if (status == NFA_STATUS_OK) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; wait for enable event", __func__);
       sNfaEnableDisablePollingEvent.wait();
     } else {
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
@@ -569,7 +645,6 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
   }
   gIsReconfiguringDiscovery.end();
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __FUNCTION__);
   return NULL;
 }
 
@@ -582,13 +657,19 @@ void* p2p_prio_logic_multiprotocol(void* arg) {
 ** Returns:         None
 **
 *******************************************************************************/
-void reconfigure_poll_cb(union sigval) {
+void restore_poll_cb(union sigval) {
+  if (multiprotocol_detected) {
+    multiprotocol_detected = 0;
+    nativeNfcTag_setP2pPrioLogic(false);
+  }
+
+  if (prio_iso_det_bitmap != PRIO_ISO_DET_INIT) {
+    prio_iso_det_bitmap = PRIO_ISO_NO_TYPE_BF_DET;
+  }
+
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; Prio_Logic_multiprotocol timer expire, CallBack Reconfiguring the "
-      "POLL to Default",
-      __func__);
-  clear_multiprotocol();
-  multiprotocol_timer.set(300, multiprotocol_clear_flag);
+      "%s; Poll reconf timer expired, restore polling", __func__);
+  start_poll_reconf_thread();
 }
 
 /*******************************************************************************
@@ -601,23 +682,18 @@ void reconfigure_poll_cb(union sigval) {
 ** Returns:         None
 **
 *******************************************************************************/
-void clear_multiprotocol() {
+void start_poll_reconf_thread() {
   int thread_ret;
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; clear_multiprotocol", __func__);
-  multiprotocol_detected = 0;
-
-  nativeNfcTag_setP2pPrioLogic(false);
 
   pthread_attr_t attr;
   pthread_attr_init(&attr);
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
   pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-  thread_ret = pthread_create(&multiprotocol_thread, &attr,
-                              p2p_prio_logic_multiprotocol, NULL);
+  thread_ret =
+      pthread_create(&poll_reconf_thread, &attr, prio_logic_poll_reconf, NULL);
   if (thread_ret != 0)
     DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; unable to create the thread", __func__);
+        << StringPrintf("%s; unable to create the thread", __FUNCTION__);
   pthread_attr_destroy(&attr);
 }
 
@@ -631,10 +707,14 @@ void clear_multiprotocol() {
 ** Returns:         None
 **
 *******************************************************************************/
-void multiprotocol_clear_flag(union sigval) {
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; multiprotocol_clear_flag", __func__);
-  multiprotocol_flag = 1;
+void poll_reconf_clear_flag() {
+  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
+  if (!multiprotocol_flag) {
+    multiprotocol_flag = 1;
+  }
+  if (prio_iso_det_bitmap != PRIO_ISO_DET_INIT) {
+    prio_iso_det_bitmap = PRIO_ISO_DET_INIT;
+  }
 }
 
 /*******************************************************************************
@@ -885,7 +965,29 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
             (multiprotocol_detected == 1)) {
           LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
               "%s; Prio_Logic_multiprotocol stop timer", __func__);
-          multiprotocol_timer.kill();
+          poll_reconf_timer.kill();
+        }
+
+        if (!sReaderModeEnabled && (prio_iso_det_bitmap == PRIO_ISO_DET_INIT) &&
+            (eventData->activated.activate_ntf.protocol ==
+             NFA_PROTOCOL_MIFARE) &&
+            !multiprotocol_detected && prio_iso_enabled) {
+          prio_iso_det_bitmap = PRIO_ISO_MIFARE_DET;
+          start_poll_reconf_thread();
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; Mifare detected, starting timer to reconf default polling",
+              __func__);
+          poll_reconf_timer.set(300, restore_poll_cb);
+          break;
+        }
+
+        if (prio_iso_det_bitmap == PRIO_ISO_MIFARE_DET) {
+          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+              "%s; B/F detected after Mifare, Killing timer to reconf default "
+              "polling",
+              __func__);
+          poll_reconf_timer.kill();
+          prio_iso_det_bitmap |= PRIO_ISO_TYPE_BF_DET;
         }
 
         if ((eventData->activated.activate_ntf.protocol == NFA_PROTOCOL_T3T) &&
@@ -894,8 +996,8 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
               "%s; T3T tag detected, Prio_Logic_multiprotocol stop timer and "
               "exit",
               __func__);
-          multiprotocol_timer.kill();
-          clear_multiprotocol();
+          poll_reconf_timer.kill();
+          start_poll_reconf_thread();
           break;
         }
 
@@ -932,7 +1034,7 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
           NfcTag::getInstance().setDeactivationState(deactivated);
         }
 
-        if (gIsSelectingRfInterface) {
+        if (gIsSelectingRfInterface && notListen) {
           nativeNfcTag_doConnectStatus(true);
           if (nativeNfcTag_isReselectIdleTag() == true) {
             NfcTag::getInstance().connectionEventHandler(
@@ -1043,7 +1145,7 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
         /* P2P-priority logic for multiprotocol tags */
         if ((multiprotocol_detected == 1) && (sP2pActive == 1)) {
           NfcTag::getInstance().mNumDiscNtf = 0;
-          clear_multiprotocol();
+          start_poll_reconf_thread();
           multiprotocol_flag = 1;
         }
 
@@ -1284,6 +1386,10 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
     case NFA_LISTEN_ENABLED_EVT:
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; NFA_LISTEN_ENABLED_EVT", __func__);
+      {
+        SyncEventGuard guard(sNfaEnableDisableListeningEvent);
+        sNfaEnableDisableListeningEvent.notifyOne();
+      }
       NfcStExtensions::getInstance().nfaConnectionCallback(connEvent,
                                                            eventData);
       break;
@@ -1291,6 +1397,10 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
     case NFA_LISTEN_DISABLED_EVT:
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; NFA_LISTEN_DISABLED_EVT", __func__);
+      {
+        SyncEventGuard guard(sNfaEnableDisableListeningEvent);
+        sNfaEnableDisableListeningEvent.notifyOne();
+      }
       NfcStExtensions::getInstance().nfaConnectionCallback(connEvent,
                                                            eventData);
       break;
@@ -1529,8 +1639,8 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
         LOG(ERROR) << StringPrintf("%s; NFA_DM_NFCC_TRANSPORT_ERR_EVT; abort",
                                    __func__);
 
-      if (recovery_option) {
-        struct nfc_jni_native_data* nat = getNative(NULL, NULL);
+      struct nfc_jni_native_data* nat = getNative(NULL, NULL);
+      if (recovery_option && nat != NULL) {
         JNIEnv* e = NULL;
         ScopedAttach attach(nat->vm, &e);
         if (e == NULL) {
@@ -1621,7 +1731,7 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
     case NFA_DM_INTF_ACTIVATED_EVT: {
       DLOG_IF(INFO, nfc_debug_enabled)
           << StringPrintf("%s; NFA_DM_INTF_ACTIVATED_EVT;", __func__);
-      NfcStExtensions::getInstance().notifyIntfActivatedEvent(
+      StFwNtfManager::getInstance().notifyIntfActivatedEvent(
           eventData->intf_activated.len, eventData->intf_activated.pdata);
     } break;
 
@@ -1827,6 +1937,11 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
   tHAL_NFC_ENTRY* halFuncEntries;
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
 
+  if (clock_gettime(CLOCK_MONOTONIC, &mRfDiscTime) == -1) {
+    LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X", __func__,
+                               errno);
+  }
+
   PowerSwitch& powerSwitch = PowerSwitch::getInstance();
 
   if (sIsNfaEnabled) {
@@ -1838,6 +1953,7 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
   NfcTag::getInstance().mNfcDisableinProgress = false;
 
   powerSwitch.initialize(PowerSwitch::FULL_POWER);
+  StFwNtfManager::getInstance().initialize(getNative(e, o));
 
   {
     NfcAdaptation& theInstance = NfcAdaptation::GetInstance();
@@ -1957,6 +2073,10 @@ static jboolean stNfcManager_doInitialize(JNIEnv* e, jobject o) {
 
         // Do custom NFCA startup configuration.
         doStartupConfig();
+
+        prio_iso_enabled =
+            property_get_bool("persist.st_nfc_prio_iso_enabled", false);
+
 #ifdef DTA_ENABLED
         NfcDta::getInstance().setNfccConfigParams();
 #endif /* DTA_ENABLED */
@@ -2070,42 +2190,6 @@ static void stNfcManager_configFieldNtfs(bool flag) {
   if (status != NFA_STATUS_OK) {
     LOG(ERROR) << StringPrintf("%s; Failed to update RF field events",
                                __func__);
-  }
-}
-
-/*******************************************************************************
-**
-** Function:        stNfcManager_configNfccConfigControl
-**
-** Description:     Turn on NFC.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         True if ok.
-**
-*******************************************************************************/
-static void stNfcManager_configNfccConfigControl(bool flag) {
-  // configure NFCC_CONFIG_CONTROL- NFCC allowed to manage RF configuration.
-  if (NFC_GetNCIVersion() != NCI_VERSION_1_0) {
-    uint8_t nfa_set_config[] = {0x00};
-
-    nfa_set_config[0] = (flag == true ? 1 : 0);
-
-    gNfccConfigControlStatus = flag;
-
-    gMutexConfig.lock();
-    SyncEventGuard guard(gNfaSetConfigEvent);
-
-    tNFA_STATUS status =
-        NFA_SetConfig(NCI_PARAM_ID_NFCC_CONFIG_CONTROL, sizeof(nfa_set_config),
-                      &nfa_set_config[0]);
-
-    if (status != NFA_STATUS_OK) {
-      LOG(ERROR) << __func__ << ": Failed to configure NFCC_CONFIG_CONTROL";
-    } else {
-      gNfaSetConfigEvent.wait();
-    }
-    gMutexConfig.unlock();
   }
 }
 
@@ -2444,7 +2528,7 @@ static jboolean stNfcManager_doDeinitialize(JNIEnv*, jobject) {
   if (sIsNfaEnabled) {
     SyncEventGuard guard(sNfaDisableEvent);
     if (multiprotocol_detected == 1) {
-      multiprotocol_timer.kill();
+      poll_reconf_timer.kill();
     }
 
     tNFA_STATUS stat = NFA_Disable(
@@ -2708,7 +2792,7 @@ static jboolean nfcManager_setForceSAK(JNIEnv* e, jobject o, jboolean enabled,
 
   // find the correct NFCEE ID
   uint8_t num =
-      StSecureElement::getInstance().retrieveHostList(nfceeid, conInfo);
+      StSecureElement::getInstance().retrieveHciHostList(nfceeid, conInfo);
   for (i = 0; i < num; i++) {
     if (((nfceeid[i] & 0x83) == 0x82)) {
       force_sak[0] = nfceeid[i];  // 82 or 86
@@ -2759,7 +2843,7 @@ static void nfcManager_enableStLog(JNIEnv* e, jobject o, jboolean enabled) {
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s;  enabled:%d", __func__, enabled);
 
-  NfcStExtensions::getInstance().StLogManagerEnable(enabled);
+  StFwNtfManager::getInstance().logManagerEnable(enabled);
 }
 
 /*******************************************************************************
@@ -2777,7 +2861,7 @@ static void nfcManager_enableActionNtf(JNIEnv* e, jobject o, jboolean enabled) {
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s;  enabled:%d", __func__, enabled);
 
-  NfcStExtensions::getInstance().StActionNtfEnable(enabled);
+  StFwNtfManager::getInstance().actionNtfEnable(enabled);
 }
 
 /*******************************************************************************
@@ -2796,7 +2880,7 @@ static void nfcManager_enableIntfActivatedNtf(JNIEnv* e, jobject o,
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s;  enabled:%d", __func__, enabled);
 
-  NfcStExtensions::getInstance().StIntfActivatedNtfEnable(enabled);
+  StFwNtfManager::getInstance().intfActivatedNtfEnable(enabled);
 }
 
 /*******************************************************************************
@@ -3587,7 +3671,7 @@ static jint nfcManager_doGetMaxRoutingTableSize(JNIEnv* e, jobject o) {
 *******************************************************************************/
 static void nfcManager_enablePollingLoopSpy(JNIEnv* e, jobject o,
                                             jboolean enabled) {
-  NfcStExtensions::getInstance().stPollingLoopSpyManagerEnable(enabled);
+  StFwNtfManager::getInstance().pollingLoopSpyManagerEnable(enabled);
 }
 
 /*******************************************************************************
@@ -3766,11 +3850,33 @@ int register_com_android_nfc_stNativeNfcManager(JNIEnv* e) {
 *******************************************************************************/
 void startRfDiscovery(bool isStart) {
   tNFA_STATUS status = NFA_STATUS_FAILED;
+  struct timespec now = {.tv_sec = 0, .tv_nsec = 0};
+  long elapsedTimeMs = 0;
 
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; is start = %d", __func__, isStart);
   nativeNfcTag_acquireRfInterfaceMutexLock();
   SyncEventGuard guard(sNfaEnableDisablePollingEvent);
+
+  // Adding waiting time if the discovery was started or stopped too recently.
+  if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+    LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X", __func__,
+                               errno);
+  } else if (now.tv_sec - mRfDiscTime.tv_sec < 2) {
+    elapsedTimeMs = (now.tv_sec - mRfDiscTime.tv_sec) * 1000;
+    elapsedTimeMs += (now.tv_nsec - mRfDiscTime.tv_nsec) / 1000000;
+
+    if (isStart && (elapsedTimeMs < 40)) {
+      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+          "%s; waiting %ld ms before start", __func__, (40 - elapsedTimeMs));
+      sNfaEnableDisablePollingEvent.wait(40 - elapsedTimeMs);
+    } else if (elapsedTimeMs < 20) {
+      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+          "%s; waiting %ld ms before stop", __func__, (20 - elapsedTimeMs));
+      sNfaEnableDisablePollingEvent.wait(20 - elapsedTimeMs);
+    }
+  }
+
   status = isStart ? NFA_StartRfDiscovery() : NFA_StopRfDiscovery();
   if (status == NFA_STATUS_OK) {
     sNfaEnableDisablePollingEvent.wait();  // wait for NFA_RF_DISCOVERY_xxxx_EVT
@@ -3780,6 +3886,11 @@ void startRfDiscovery(bool isStart) {
         "%s; Failed to start/stop RF discovery; error=0x%X", __func__, status);
   }
   nativeNfcTag_releaseRfInterfaceMutexLock();
+
+  if (clock_gettime(CLOCK_MONOTONIC, &mRfDiscTime) == -1) {
+    LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X", __func__,
+                               errno);
+  }
 }
 
 /*******************************************************************************
@@ -4099,6 +4210,29 @@ static void doDtaStartupConfig(tHAL_NFC_ENTRY* halFuncEntries) {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
   NfcStExtensions::getInstance().setDtaConfig(halFuncEntries);
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
+}
+
+/*******************************************************************************
+**
+** Function:        checkIfPollReconfNeeded
+**
+** Description:     Cases tag is deactivated by events external than presw check
+**                  failed => check if reconf if needed
+*rerouted.
+**
+** Returns:         None.
+**
+*******************************************************************************/
+bool checkIfPollReconfNeeded() {
+  if (prio_iso_det_bitmap == (PRIO_ISO_MIFARE_DET | PRIO_ISO_TYPE_BF_DET)) {
+    LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        "%s; Reconfigure default polling after MIFARE/TYPE_B", __func__);
+    prio_logic_poll_reconf(nullptr);
+    prio_iso_det_bitmap = PRIO_ISO_DET_INIT;
+    return true;
+  }
+  prio_iso_det_bitmap = PRIO_ISO_DET_INIT;
+  return false;
 }
 
 } /* namespace android */

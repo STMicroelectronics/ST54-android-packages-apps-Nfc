@@ -4,6 +4,8 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.os.Handler;
+import android.os.Message;
 import android.os.SystemProperties;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
@@ -19,6 +21,11 @@ public class NfcSimStateObserver extends BroadcastReceiver {
     private static final int MSG_TIMEOUT = 1;
     private Context mContext;
     // private Handler mHandler;
+
+    static final int MSG_SIM1_ABSENT = 0;
+    static final int MSG_SIM2_ABSENT = 1;
+    private NfcSimStateObserverHandler mHandler = new NfcSimStateObserverHandler();
+
     // private IntentFilter mFilter;
     // private Callback mCallback;
     private boolean mIsAirplaneModeOn;
@@ -89,26 +96,30 @@ public class NfcSimStateObserver extends BroadcastReceiver {
     }
 
     public int GetSimState(int simId) {
-        Log.d(
-                TAG,
-                "GetSimState simId = "
-                        + simId
-                        + ", mSim1State = "
-                        + mSim1State
-                        + " mSim2State = "
-                        + mSim2State);
+        if (SystemProperties.get("persist.st_nfc_ignore_modem").equals("1")) {
+            Log.d(TAG, "GetSimState() - Ignore modem intents");
+        } else {
+            Log.d(
+                    TAG,
+                    "GetSimState simId = "
+                            + simId
+                            + ", mSim1State = "
+                            + mSim1State
+                            + " mSim2State = "
+                            + mSim2State);
+        }
 
         if (simId == 0) {
             if (mSim1State == STATE_UNKNOWN) {
                 int s = TelephonyManager.getDefault().getSimState(simId);
-                Log.d(TAG, "Retrieved SIM1 state: " + s);
+                Log.d(TAG, "GetSimState()- Retrieved SIM1 state: " + s);
                 mSim1State = convertTelephonyState(s);
             }
             return mSim1State;
         } else if (simId == 1) {
             if (mSim2State == STATE_UNKNOWN) {
                 int s = TelephonyManager.getDefault().getSimState(simId);
-                Log.d(TAG, "Retrieved SIM2 state: " + s);
+                Log.d(TAG, "GetSimState() - Retrieved SIM2 state: " + s);
                 mSim2State = convertTelephonyState(s);
             }
             return mSim2State;
@@ -138,10 +149,42 @@ public class NfcSimStateObserver extends BroadcastReceiver {
                 SystemProperties.get("persist.st_nfc_modem_airplane").equals("1");
     }
 
+    final class NfcSimStateObserverHandler extends Handler {
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MSG_SIM1_ABSENT:
+                    Log.d(
+                            TAG,
+                            "NfcSimStateObserverHandler - Timeout waiting for SIM1 state update, consider present");
+                    getInstance().updateSimState(0, STATE_PRESENT_READY);
+                    break;
+
+                case MSG_SIM2_ABSENT:
+                    Log.d(
+                            TAG,
+                            "NfcSimStateObserverHandler - Timeout waiting for SIM2 state update, consider present");
+                    getInstance().updateSimState(1, STATE_PRESENT_READY);
+                    break;
+
+                default:
+                    Log.e(TAG, "NfcSimStateObserverHandler - Unknown message received");
+                    break;
+            }
+        }
+    }
+
     private void updateSimState(int simId, int newState) {
         NfcSimStateObserver instance = getInstance();
         int prevState = STATE_UNKNOWN;
         int prevPending = PENDING_NONE;
+        int msg = (simId == 0 ? MSG_SIM1_ABSENT : MSG_SIM2_ABSENT);
+        instance.mHandler.removeMessages(msg);
+        if (newState == STATE_UNKNOWN) {
+            // If no new intent after NOT_READY, consider the SIM is absent after 5 seconds
+            instance.mHandler.sendEmptyMessageDelayed(msg, 5000);
+            return;
+        }
         if (simId == 0) {
             prevState = instance.mSim1State;
             prevPending = instance.mPendingSim1;
@@ -177,7 +220,7 @@ public class NfcSimStateObserver extends BroadcastReceiver {
             Log.e(TAG, "onReceive() action == null");
             return;
         }
-        Log.d(TAG, "onReceive: " + action);
+        Log.d(TAG, "onReceive() - : " + action);
 
         if (action.equals(TelephonyIntents.ACTION_SIM_STATE_CHANGED)) {
             String iccState;
@@ -189,7 +232,7 @@ public class NfcSimStateObserver extends BroadcastReceiver {
             }
             Log.d(
                     TAG,
-                    "ACTION_SIM_STATE_CHANGED receiver with iccState = "
+                    "onReceive() - ACTION_SIM_STATE_CHANGED receiver with iccState = "
                             + iccState
                             + ", simId = "
                             + simId);
@@ -210,13 +253,15 @@ public class NfcSimStateObserver extends BroadcastReceiver {
                 updateSimState(simId, STATE_PRESENT_BUSY);
             } else if (iccState.equals(IccCardConstants.INTENT_VALUE_ABSENT_ON_PERM_DISABLED)) {
                 updateSimState(simId, STATE_PRESENT_READY);
+            } else if (iccState.equals(IccCardConstants.INTENT_VALUE_ICC_NOT_READY)) {
+                updateSimState(simId, STATE_UNKNOWN);
             }
         } else if (action.equals(Intent.ACTION_AIRPLANE_MODE_CHANGED)) {
             NfcSimStateObserver instance = getInstance();
             instance.mIsAirplaneModeOn = intent.getBooleanExtra("state", false);
             Log.d(
                     TAG,
-                    "ACTION_AIRPLANE_MODE_CHANGED receiver, state = "
+                    "onReceive() - ACTION_AIRPLANE_MODE_CHANGED receiver, state = "
                             + instance.mIsAirplaneModeOn
                             + ", mSimListener="
                             + instance.mSimListener);
@@ -288,7 +333,7 @@ public class NfcSimStateObserver extends BroadcastReceiver {
                                     synchronized (instance) {
                                         Log.d(
                                                 TAG,
-                                                "mPendingSim1="
+                                                "registerSimEventListener() - mPendingSim1="
                                                         + instance.mPendingSim1
                                                         + " mPendingSim2="
                                                         + instance.mPendingSim2

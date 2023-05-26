@@ -97,37 +97,6 @@ static jbyteArray nativeNfcStExtensions_getHWVersion(JNIEnv *e, jobject) {
 
 /*******************************************************************************
 **
-** Function:        nativeNfcStExtensions_getCRCConfiguration
-**
-** Description:     Connect to the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static jbyteArray nativeNfcStExtensions_getCRCConfiguration(JNIEnv *e,
-                                                            jobject) {
-  jbyteArray result = NULL;
-  uint8_t crc_config[NfcStExtensions::getInstance().CRC_CONFIG_SIZE];
-  memset(crc_config, 0, sizeof crc_config);
-  NfcStExtensions::getInstance().getCRCConfiguration(crc_config);
-
-  {
-    // copy results back to java
-    result = e->NewByteArray(NfcStExtensions::getInstance().CRC_CONFIG_SIZE);
-    if (result != NULL) {
-      e->SetByteArrayRegion(result, 0,
-                            NfcStExtensions::getInstance().CRC_CONFIG_SIZE,
-                            (jbyte *)crc_config);
-    }
-  }
-
-  return result;
-}
-
-/*******************************************************************************
-**
 ** Function:        nativeNfcStExtensions_getCustomerData
 **
 ** Description:     Connect to the secure element.
@@ -246,90 +215,6 @@ static int nativeNfcStExtensions_getRfConfiguration(JNIEnv *e, jobject,
                         (jbyte *)outputArray);
 
   return modeBitmap;
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_setRfBitmap
-**
-** Description:     Connect to the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:
-**
-*******************************************************************************/
-static void nativeNfcStExtensions_setRfBitmap(JNIEnv *e, jobject,
-                                              jint modeBitmap) {
-  NfcStExtensions::getInstance().setRfBitmap(modeBitmap);
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_updatePipesInfo
-**
-** Description:     Send data to the secure element; retrieve response.
-**                  e: JVM environment.
-**                  o: Java object.
-**                  handle: Secure element's handle.
-**                  data: Data to send.
-**
-** Returns:         Buffer of received data.
-**
-*******************************************************************************/
-static jint nativeNfcStExtensions_updatePipesInfo(JNIEnv *e, jobject o) {
-  int pipe_id;
-  jint host_id;
-
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
-
-  bool res = NfcStExtensions::getInstance().getPipesInfo();
-  if (res == true) {
-    pipe_id = NfcStExtensions::getInstance().getPipeIdForGate(
-        NfcStExtensions::getInstance().DH_HCI_ID, 0x41);
-
-    if (pipe_id != 0xFF) {
-      host_id = NfcStExtensions::getInstance().getHostIdForPipe(pipe_id);
-      if (host_id != 0xFF) {
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit:", __func__);
-        return host_id;
-      }
-    }
-  }
-
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit:", __func__);
-  return 0xFF;
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_setDefaultOffHostRoute
-**
-** Description:     Get the technology / protocol routing table.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static void nativeNfcStExtensions_setDefaultOffHostRoute(JNIEnv *e, jobject,
-                                                         jint route) {
-  NfcStExtensions::getInstance().setDefaultOffHostRoute(route);
-}
-
-/*******************************************************************************
-**
-** Function:        nativeNfcStExtensions_getDefaultOffHostRoute
-**
-** Description:     Get the technology / protocol routing table.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static jint nativeNfcStExtensions_getDefaultOffHostRoute(JNIEnv *e, jobject) {
-  return NfcStExtensions::getInstance().getDefaultOffHostRoute();
 }
 
 /*******************************************************************************
@@ -626,6 +511,32 @@ static int nativeNfcStExtensions_getAvailableHciHostList(JNIEnv *e, jobject,
 
 /*******************************************************************************
 **
+** Function:        nativeNfcStExtensions_getAvailableNfceeList
+**
+** Description:     Set a NCI parameter.
+**                  e: JVM environment.
+**                  o: Java object.
+**
+** Returns:         Handle of secure element.  values < 0 represent failure.
+**
+*******************************************************************************/
+static int nativeNfcStExtensions_getAvailableNfceeList(JNIEnv *e, jobject,
+                                                       jbyteArray nfceeId,
+                                                       jbyteArray conInfo) {
+  uint8_t nfceeIdArray[NFA_EE_MAX_EE_SUPPORTED];
+  uint8_t conInfoArray[NFA_EE_MAX_EE_SUPPORTED];
+  int num = 0;
+
+  num = NfcStExtensions::getInstance().getAvailableNfceeList(nfceeIdArray,
+                                                             conInfoArray);
+
+  e->SetByteArrayRegion(nfceeId, 0, num, (jbyte *)nfceeIdArray);
+  e->SetByteArrayRegion(conInfo, 0, num, (jbyte *)conInfoArray);
+  return num;
+}
+
+/*******************************************************************************
+**
 ** Function:        nativeNfcStExtensions_sendPropSetConfig
 **
 ** Description:     Set a NCI parameter.
@@ -802,8 +713,6 @@ static jboolean nativeNfcStExtensions_checkNdefNfceeAvailable(JNIEnv *e,
 static JNINativeMethod gMethods[] = {
     {"getFirmwareVersion", "()[B",
      (void *)nativeNfcStExtensions_getFirmwareVersion},
-    {"getCRCConfiguration", "()[B",
-     (void *)nativeNfcStExtensions_getCRCConfiguration},
     {"getHWVersion", "()[B", (void *)nativeNfcStExtensions_getHWVersion},
     {"isUiccConnected", "()Z", (void *)nativeNfcStExtensions_isUiccConnected},
     {"iseSEConnected", "()Z", (void *)nativeNfcStExtensions_iseSEConnected},
@@ -812,12 +721,6 @@ static JNINativeMethod gMethods[] = {
      (void *)nativeNfcStExtensions_setRfConfiguration},
     {"getRfConfiguration", "([B)I",
      (void *)nativeNfcStExtensions_getRfConfiguration},
-    {"setRfBitmap", "(I)V", (void *)nativeNfcStExtensions_setRfBitmap},
-    {"updatePipesInfo", "()I", (void *)nativeNfcStExtensions_updatePipesInfo},
-    {"setDefaultOffHostRoute", "(I)V",
-     (void *)nativeNfcStExtensions_setDefaultOffHostRoute},
-    {"getDefaultOffHostRoute", "()I",
-     (void *)nativeNfcStExtensions_getDefaultOffHostRoute},
     {"getProprietaryConfigSettings", "(III)Z",
      (void *)nativeNfcStExtensions_getProprietaryConfigSettings},
     {"setProprietaryConfigSettings", "(IIIZ)V",
@@ -844,6 +747,8 @@ static JNINativeMethod gMethods[] = {
     {"rawJniSeq", "(I[B)[B", (void *)nativeNfcStExtensions_rawJniSeq},
     {"checkNdefNfceeAvailable", "()Z",
      (void *)nativeNfcStExtensions_checkNdefNfceeAvailable},
+    {"getAvailableNfceeList", "([B[B)I",
+     (void *)nativeNfcStExtensions_getAvailableNfceeList},
 };
 
 /*******************************************************************************

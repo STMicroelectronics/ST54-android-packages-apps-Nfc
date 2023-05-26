@@ -49,8 +49,6 @@ public class NativeNfcStExtensions {
 
     public native byte[] getFirmwareVersion();
 
-    public native byte[] getCRCConfiguration();
-
     public native byte[] getHWVersion();
 
     public native void setRfConfiguration(int modeBitmap, byte[] techArray);
@@ -58,12 +56,6 @@ public class NativeNfcStExtensions {
     public native int getRfConfiguration(byte[] techArray);
 
     public native void setRfBitmap(int modeBitmap);
-
-    public native int updatePipesInfo();
-
-    public native void setDefaultOffHostRoute(int route);
-
-    public native int getDefaultOffHostRoute();
 
     public native boolean getProprietaryConfigSettings(int SubSetID, int byteNb, int bitNb);
 
@@ -103,4 +95,6 @@ public class NativeNfcStExtensions {
     public native byte[] rawJniSeq(int i, byte[] ba);
 
     public native boolean checkNdefNfceeAvailable();
+
+    public native int getAvailableNfceeList(byte[] nfceeId, byte[] conInfo);
 }

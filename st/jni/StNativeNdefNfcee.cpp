@@ -191,7 +191,7 @@ static jboolean StNativeNdefNfcee_dolockNdefData(JNIEnv* e, jobject o,
 
   rslt = StNdefNfcee::getInstance().lockFile(fileBuf, lock);
 
-  return false;
+  return rslt;
 }
 
 /*******************************************************************************

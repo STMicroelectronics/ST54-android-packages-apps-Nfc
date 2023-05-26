@@ -42,6 +42,7 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
+import android.nfc.cardemulation.Utils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
@@ -50,8 +51,8 @@ import android.os.Message;
 import android.os.Messenger;
 import android.os.PowerManager;
 import android.os.RemoteException;
-import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
 import com.android.nfcstm.NfcService;
@@ -64,7 +65,7 @@ import java.util.ArrayList;
 
 public class HostEmulationManager {
     static final String TAG = "HCENfc_HostEmulationManager";
-    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
 
     static final int STATE_IDLE = 0;
     static final int STATE_W4_SELECT = 1;
@@ -72,7 +73,7 @@ public class HostEmulationManager {
     static final int STATE_W4_DEACTIVATE = 3;
     static final int STATE_XFER = 4;
 
-    /** Minimum AID lenth as per ISO7816 */
+    /** Minimum AID length as per ISO7816 */
     static final int MINIMUM_AID_LENGTH = 5;
 
     /** Length of Select APDU header including length byte */
@@ -130,7 +131,7 @@ public class HostEmulationManager {
         mLock = new Object();
         mAidCache = aidCache;
         mState = STATE_IDLE;
-        mKeyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        mKeyguard = context.getSystemService(KeyguardManager.class);
         mPowerManager = context.getSystemService(PowerManager.class);
     }
 
@@ -230,7 +231,6 @@ public class HostEmulationManager {
                         return;
                     }
                     if (defaultServiceInfo.requiresScreenOn() && !mPowerManager.isScreenOn()) {
-                        NfcService.getInstance().sendRequireUnlockIntent();
                         NfcService.getInstance().sendData(AID_NOT_FOUND);
                         if (DBG) Log.d(TAG, "requiresScreenOn()!");
                         return;
@@ -261,6 +261,7 @@ public class HostEmulationManager {
                     // Ask the user to confirm.
                     // Just ignore all future APDUs until we resolve to only one
                     mState = STATE_W4_DEACTIVATE;
+                    NfcStatsLog.write(NfcStatsLog.NFC_AID_CONFLICT_OCCURRED, selectAid);
                     launchResolver(
                             (ArrayList<StApduServiceInfo>) resolveInfo.services,
                             null,
@@ -271,8 +272,8 @@ public class HostEmulationManager {
             switch (mState) {
                 case STATE_W4_SELECT:
                     if (selectAid != null) {
-                        UserHandle user =
-                                UserHandle.getUserHandleForUid(resolvedServiceInfo.getUid());
+                        int uid = resolvedServiceInfo.getUid();
+                        UserHandle user = UserHandle.getUserHandleForUid(uid);
                         Messenger existingService =
                                 bindServiceIfNeededLocked(user.getIdentifier(), resolvedService);
                         if (existingService != null) {
@@ -290,12 +291,14 @@ public class HostEmulationManager {
                             NfcStatsLog.write(
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_PAYMENT,
-                                    "HCE");
+                                    "HCE",
+                                    uid);
                         } else {
                             NfcStatsLog.write(
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                                     NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_OTHER,
-                                    "HCE");
+                                    "HCE",
+                                    uid);
                         }
                     } else {
                         Log.d(
@@ -557,7 +560,7 @@ public class HostEmulationManager {
                         TAG,
                         "findSelectAid() - Selecting next, last or previous AID occurrence is not supported");
             }
-            int aidLength = data[4];
+            int aidLength = Byte.toUnsignedInt(data[4]);
             if (data.length < SELECT_APDU_HDR_LENGTH + aidLength) {
                 return null;
             }
@@ -720,6 +723,7 @@ public class HostEmulationManager {
                     AidResolveInfo resolveInfo = mAidCache.resolveAid(mLastSelectedAid);
                     boolean isPayment = false;
                     if (resolveInfo.services.size() > 0) {
+                        NfcStatsLog.write(NfcStatsLog.NFC_AID_CONFLICT_OCCURRED, mLastSelectedAid);
                         launchResolver(
                                 (ArrayList<StApduServiceInfo>) resolveInfo.services,
                                 mActiveServiceName,
@@ -767,7 +771,8 @@ public class HostEmulationManager {
             mPaymentServiceName.dumpDebug(proto, HostEmulationManagerProto.PAYMENT_SERVICE_NAME);
         }
         if (mServiceBound) {
-            mServiceName.dumpDebug(proto, HostEmulationManagerProto.SERVICE_NAME);
+            Utils.dumpDebugComponentName(
+                    mServiceName, proto, HostEmulationManagerProto.SERVICE_NAME);
         }
     }
 }

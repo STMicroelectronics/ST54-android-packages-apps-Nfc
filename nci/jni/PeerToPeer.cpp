@@ -46,9 +46,7 @@ extern void nativeNfcTag_registerNdefTypeHandler();
 extern void nativeNfcTag_deregisterNdefTypeHandler();
 extern void startRfDiscovery(bool isStart);
 extern bool isDiscoveryStarted();
-
 extern bool gIsDtaEnabled;
-
 }  // namespace android
 
 PeerToPeer PeerToPeer::sP2p;

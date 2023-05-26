@@ -71,6 +71,8 @@ class StRoutingManager {
 
   int getRemainingLmrtSize();
   void notifyAidAdded();
+  uint8_t getDisconnectedUiccId();
+  void setDisconnectedUiccId(uint8_t id);
 
  private:
   StRoutingManager();
@@ -78,12 +80,11 @@ class StRoutingManager {
   StRoutingManager(const StRoutingManager&);
   StRoutingManager& operator=(const StRoutingManager&);
 
-  void notifyEeUpdated();
-
   void handleData(uint8_t technology, const uint8_t* data, uint32_t dataLen,
                   tNFA_STATUS status);
   void notifyActivated(uint8_t technology);
   void notifyDeactivated(uint8_t technology);
+  void notifyEeUpdated();
   tNFA_TECHNOLOGY_MASK updateEeTechRouteSetting();
   void updateDefaultProtocolRoute();
   void updateDefaultRoute();
@@ -97,6 +98,9 @@ class StRoutingManager {
   int getScTypeFRouting(eJNI_ROUTING_TYPE type);
 
   int checkIsoDepSupport(int route);
+
+  void setVarDefaultRoutes();
+  bool checkIfUiccRoute();
 
   // Every routing table entry is matched exact (BCM20793)
   static const int AID_MATCHING_EXACT_ONLY = 0x00;
@@ -156,6 +160,16 @@ class StRoutingManager {
   int mConnectedDefaultMifareRoute;
   int mConnectedDefaultScRoute;
   int mConnectedDefaultAidRoute;
+
+  int mWantedDefaultOffHostRoute;
+  int mWantedDefaultIsoDepRoute;
+  int mWantedDefaultFelicaRoute;
+  int mWantedDefaultMifareRoute;
+  int mWantedDefaultScRoute;
+  int mWantedDefaultAidRoute;
+
+  uint8_t mDisconnectedUicc;
+  int mPreviousScRoute;
 
   bool mIsInit;
 

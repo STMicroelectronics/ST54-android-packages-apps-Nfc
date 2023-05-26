@@ -23,7 +23,7 @@
 #include <log/log.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include <nativehelper/ScopedPrimitiveArray.h>
-
+#include <statslog_nfc_st.h>
 #include "IntervalTimer.h"
 #include "JavaClassConstants.h"
 #include "StNfcJni.h"
@@ -84,6 +84,7 @@ NfcTag::NfcTag()
   memset(mTechParams, 0, sizeof(mTechParams));
   memset(mLastKovioUid, 0, NFC_KOVIO_MAX_LEN);
   memset(&mLastKovioTime, 0, sizeof(timespec));
+  mNfcStatsUtil = new NfcStatsUtil();
   memset(&mActivationParams_t, 0, sizeof(activationParams_t));
 }
 
@@ -439,7 +440,6 @@ void NfcTag::discoverTechnologies(tNFA_ACTIVATED& activationData) {
     mTechList[mNumTechList] = TARGET_TYPE_KOVIO_BARCODE;
   } else if (NFC_PROTOCOL_MIFARE == rfDetail.protocol) {
     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; Mifare Classic", fn);
-    //    EXTNS_MfcInit(activationData);
     mTechList[mNumTechList] =
         TARGET_TYPE_MIFARE_CLASSIC;  // is TagTechnology.MIFARE_CLASSIC
 
@@ -488,7 +488,8 @@ void NfcTag::discoverTechnologies(tNFA_ACTIVATED& activationData) {
         "%s; index=%d; tech=0x%02X; handle=%d; nfc type=0x%02X", fn, i,
         mTechList[i], mTechHandles[i], mTechLibNfcTypes[i]);
   }
-
+  mNfcStatsUtil->logNfcTagType(mTechLibNfcTypes[mNumTechList - 1],
+                               mTechParams[mNumTechList - 1].mode);
 TheEnd:
   return;
 }
@@ -615,6 +616,16 @@ void NfcTag::discoverTechnologies(tNFA_DISC_RESULT& discoveryData) {
           << StringPrintf("%s; Tech type B, unknown ", fn);
       mTechList[mNumTechList] =
           TARGET_TYPE_ISO14443_3B;  // is TagTechnology.NFC_B by Java API
+      // save the stack's data structure for interpretation later
+      memcpy(&(mTechParams[mNumTechList]), &(discovery_ntf.rf_tech_param),
+             sizeof(discovery_ntf.rf_tech_param));
+    } else if ((NFC_PROTOCOL_NFC_DEP == discovery_ntf.protocol) &&
+               (discovery_ntf.rf_tech_param.mode ==
+                NFC_DISCOVERY_TYPE_POLL_A)) {
+      DLOG_IF(INFO, nfc_debug_enabled)
+          << StringPrintf("%s; Tech type A, NFC-DEP ", fn);
+      mTechList[mNumTechList] =
+          TARGET_TYPE_ISO14443_3A;  // is TagTechnology.NFC_B by Java API
       // save the stack's data structure for interpretation later
       memcpy(&(mTechParams[mNumTechList]), &(discovery_ntf.rf_tech_param),
              sizeof(discovery_ntf.rf_tech_param));
@@ -940,7 +951,11 @@ void NfcTag::fillNativeNfcTagMembers3(JNIEnv* e, jclass tag_cls, jobject tag,
       pollBytes.reset(e->NewByteArray(2));
       e->SetByteArrayRegion(pollBytes.get(), 0, 2, (jbyte*)data);
     } else {
-      LOG(ERROR) << StringPrintf("%s; tech unknown ????", fn);
+      if (NFC_DISCOVERY_TYPE_POLL_KOVIO == mTechParams[i].mode) {
+        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; Thinfilm", fn);
+      } else {
+        LOG(ERROR) << StringPrintf("%s; tech unknown ????", fn);
+      }
       pollBytes.reset(e->NewByteArray(0));
     }  // switch: every type of technology
     e->SetObjectArrayElement(techPollBytes.get(), i, pollBytes.get());

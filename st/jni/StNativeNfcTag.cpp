@@ -24,7 +24,7 @@
 #include <signal.h>
 #include <string.h>
 #include <time.h>
-#include <string>
+
 #include "IntervalTimer.h"
 #include "JavaClassConstants.h"
 #include "Mutex.h"
@@ -43,6 +43,7 @@ using android::base::StringPrintf;
 namespace android {
 extern nfc_jni_native_data* getNative(JNIEnv* e, jobject o);
 extern bool nfcManager_isNfcActive();
+extern bool checkIfPollReconfNeeded();
 }  // namespace android
 
 extern bool gActivated;
@@ -134,6 +135,7 @@ static unsigned sPresCheckCount = 0;
 static int sPresCheckStatus = 0;
 static bool sReselectSendIFrame = false;
 static bool sReselectIdleTag = false;
+static bool sReselectDiscRestart = false;
 
 int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded);
 static bool switchRfInterface(tNFA_INTF_TYPE rfInterface);
@@ -156,8 +158,6 @@ struct sNonNciCard {
 static int sCurrentConnectedHandle;
 static bool sReconnectFlag = false;
 static bool sIsP2pPrioLogic = false;
-
-static bool sIsReconnectNoReset = false;
 
 void nativeNfcTag_cacheNonNciCardDetection();
 void nativeNfcTag_handleNonNciCardDetection(tNFA_CONN_EVT_DATA* eventData);
@@ -729,6 +729,9 @@ void nativeNfcTag_doConnectStatus(jboolean isConnectOk) {
   if (sConnectWaitingForComplete != JNI_FALSE) {
     sConnectWaitingForComplete = JNI_FALSE;
     sConnectOk = isConnectOk;
+    if (gIsSelectingRfInterface) {
+      sReselectDiscRestart = !isConnectOk;
+    }
     SyncEventGuard g(sReconnectEvent);
     sReconnectEvent.notifyOne();
   }
@@ -859,12 +862,6 @@ static jint nativeNfcTag_doConnect(JNIEnv*, jobject, jint targetHandle) {
     if (targetHandle != 0) {
       retCode = NFA_STATUS_FAILED;
     }
-  }
-
-  // If last handle, clear NDEF detection tiemout flag to enable future
-  // attemtps at reselection
-  if (targetHandle == (natTag.mNumTechList - 1)) {
-    natTag.resetNdefDetectionTimedOut();
   }
 
 TheEnd:
@@ -1226,6 +1223,10 @@ static jint nativeNfcTag_doReconnect(JNIEnv*, jobject) {
     goto TheEnd;
   }
 
+  // Clear NDEF detection tiemout flag to enable future
+  // attemtps at reselection
+  natTag.resetNdefDetectionTimedOut();
+
   // this is only supported for type 2 or 4 (ISO_DEP) tags
   if (sCurrentConnectedTargetProtocol == NFA_PROTOCOL_ISO_DEP)
     retCode = reSelect(NFA_INTERFACE_ISO_DEP, false);
@@ -1237,7 +1238,7 @@ static jint nativeNfcTag_doReconnect(JNIEnv*, jobject) {
   // This shall not be done if reconnect is done for
   // transceive() failed on Mifare tag
   if ((retCode == NFA_STATUS_OK) && (sCurrentConnectedHandle != 0) &&
-      !sIsReconnectNoReset) {
+      sReselectDiscRestart) {
     // reselect() is always done on first handle
     // Variables need to be updated
     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
@@ -1248,7 +1249,7 @@ static jint nativeNfcTag_doReconnect(JNIEnv*, jobject) {
   }
 
 TheEnd:
-  sIsReconnectNoReset = false;
+  sReselectDiscRestart = false;
   gIsReconfiguringDiscovery.end();
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; exit 0x%X", __func__, retCode);
@@ -1303,6 +1304,12 @@ jboolean nativeNfcTag_doDisconnect(JNIEnv*, jobject) {
   }
 
   NfcTag::getInstance().resetTechnologies();
+
+  if (checkIfPollReconfNeeded()) {
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; Discovery restarted, skip deactivate", __func__);
+    goto TheEnd;
+  }
 
   if ((NfcTag::getInstance().getActivationState() != NfcTag::Active) &&
       ((NfcTag::getInstance().getActivationState() != NfcTag::Sleep))) {
@@ -1429,8 +1436,6 @@ static jbyteArray nativeNfcTag_doTransceive(JNIEnv* e, jobject o,
   bool fNeedToSwitchBack = false;
   bool isSendingSelectApdu = false;
 
-  sIsReconnectNoReset = false;
-
   if (NfcTag::getInstance().getActivationState() != NfcTag::Active) {
     if (statusTargetLost) {
       targetLost = e->GetIntArrayElements(statusTargetLost, 0);
@@ -1538,7 +1543,6 @@ static jbyteArray nativeNfcTag_doTransceive(JNIEnv* e, jobject o,
         // to wake it.
         DLOG_IF(INFO, nfc_debug_enabled)
             << StringPrintf("%s; try reconnect", __func__);
-        sIsReconnectNoReset = true;
         nativeNfcTag_doReconnect(NULL, NULL);
         DLOG_IF(INFO, nfc_debug_enabled)
             << StringPrintf("%s; reconnect finish", __func__);
@@ -1556,7 +1560,6 @@ static jbyteArray nativeNfcTag_doTransceive(JNIEnv* e, jobject o,
 
         if ((transDataLen == 1) && (transData[0] != 0x00)) {
           /* an error occurred: timeout, unexpected command, etc */
-          sIsReconnectNoReset = true;
           nativeNfcTag_doReconnect(e, o);
         } else {
           if (transDataLen != 0) {
@@ -1754,7 +1757,6 @@ static jint nativeNfcTag_doCheckNdef(JNIEnv* e, jobject o, jintArray ndefInfo) {
     sIsCheckingNDef = false;
     return NFA_STATUS_FAILED;
   } else if (sCurrentConnectedTargetProtocol == NFC_PROTOCOL_MIFARE) {
-    sIsReconnectNoReset = true;
     if (NFCSTATUS_SUCCESS != nativeNfcTag_doReconnect(e, o)) {
       LOG(ERROR) << StringPrintf("%s; Reconnect failed so return error",
                                  __func__);
@@ -1839,7 +1841,6 @@ static jint nativeNfcTag_doCheckNdef(JNIEnv* e, jobject o, jintArray ndefInfo) {
 
   /* Reconnect Mifare Classic Tag for furture use */
   if (sCurrentConnectedTargetProtocol == NFC_PROTOCOL_MIFARE) {
-    sIsReconnectNoReset = true;
     if (NFCSTATUS_SUCCESS != nativeNfcTag_doReconnect(e, o)) {
       LOG(ERROR) << StringPrintf("%s; Reconnect failed so return error",
                                  __func__);
@@ -2239,7 +2240,6 @@ static jboolean nativeNfcTag_doNdefFormat(JNIEnv* e, jobject o, jbyteArray) {
 
   if (sCurrentConnectedTargetProtocol == NFA_PROTOCOL_ISO_DEP) {
     int retCode = NFCSTATUS_SUCCESS;
-    sIsReconnectNoReset = true;
     retCode = nativeNfcTag_doReconnect(e, o);
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; Status = 0x%X", __func__, retCode);

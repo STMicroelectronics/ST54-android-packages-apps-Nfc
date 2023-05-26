@@ -24,11 +24,12 @@ import android.content.IntentFilter;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.PackageManager.ResolveInfoFlags;
 import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
-import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.sysprop.NfcProperties;
 import android.util.Log;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,8 +41,7 @@ import org.xmlpull.v1.XmlPullParserException;
 /** A cache of intent filters registered to receive the TECH_DISCOVERED dispatch. */
 public class RegisteredComponentCache {
     private static final String TAG = "RegisteredComponentCache";
-    private static final boolean DEBUG =
-            SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
+    private static final boolean DEBUG = NfcProperties.debug_enabled().orElse(false);
 
     final Context mContext;
     final String mAction;
@@ -71,16 +71,16 @@ public class RegisteredComponentCache {
         intentFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
         intentFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
         intentFilter.addDataScheme("package");
-        mContext.registerReceiverAsUser(receiver, UserHandle.ALL, intentFilter, null, null);
+        mContext.registerReceiverForAllUsers(receiver, intentFilter, null, null);
         // Register for events related to sdcard installation.
         IntentFilter sdFilter = new IntentFilter();
         sdFilter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
         sdFilter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
-        mContext.registerReceiverAsUser(receiver, UserHandle.ALL, sdFilter, null, null);
+        mContext.registerReceiverForAllUsers(receiver, sdFilter, null, null);
         // Generate a new list upon switching users as well
         IntentFilter userFilter = new IntentFilter();
         userFilter.addAction(Intent.ACTION_USER_SWITCHED);
-        mContext.registerReceiverAsUser(receiver, UserHandle.ALL, userFilter, null, null);
+        mContext.registerReceiverForAllUsers(receiver, userFilter, null, null);
     }
 
     public static class ComponentInfo {
@@ -143,7 +143,7 @@ public class RegisteredComponentCache {
     void generateComponentsList() {
         PackageManager pm;
         try {
-            UserHandle currentUser = new UserHandle(ActivityManager.getCurrentUser());
+            UserHandle currentUser = UserHandle.of(ActivityManager.getCurrentUser());
             pm = mContext.createPackageContextAsUser("android", 0, currentUser).getPackageManager();
         } catch (NameNotFoundException e) {
             Log.e(TAG, "Could not create user package context");
@@ -153,8 +153,8 @@ public class RegisteredComponentCache {
         List<ResolveInfo> resolveInfos =
                 pm.queryIntentActivitiesAsUser(
                         new Intent(mAction),
-                        PackageManager.GET_META_DATA,
-                        ActivityManager.getCurrentUser());
+                        ResolveInfoFlags.of(PackageManager.GET_META_DATA),
+                        UserHandle.of(ActivityManager.getCurrentUser()));
         for (ResolveInfo resolveInfo : resolveInfos) {
             try {
                 parseComponentInfo(pm, resolveInfo, components);

@@ -22,13 +22,12 @@ class ScreenStateHelper {
     private final KeyguardManager mKeyguardManager;
 
     ScreenStateHelper(Context context) {
-        mKeyguardManager = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
-        mPowerManager = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+        mKeyguardManager = context.getSystemService(KeyguardManager.class);
+        mPowerManager = context.getSystemService(PowerManager.class);
     }
 
     int checkScreenState() {
-        // TODO: fix deprecated api
-        if (!mPowerManager.isScreenOn()) {
+        if (!mPowerManager.isInteractive()) {
             if (mKeyguardManager.isKeyguardLocked()) {
                 return SCREEN_STATE_OFF_LOCKED;
             } else {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2011 The Android Open Source Project
+ * Copyright (C) 2010 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,7 @@
  * limitations under the License.
  */
 
-package com.android.nfcstm.snep;
+#pragma once
 
-public class SnepException extends Exception {
-
-    public SnepException(String message) {
-        super(message);
-    }
-
-    public SnepException(Exception cause) {
-        super(cause);
-    }
-
-    public SnepException(String message, Exception cause) {
-        super(message, cause);
-    }
-}
+#include "JNIHelp.h"
+#include <nativehelper/scoped_primitive_array.h>

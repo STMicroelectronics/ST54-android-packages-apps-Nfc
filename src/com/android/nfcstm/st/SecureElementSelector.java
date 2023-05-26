@@ -104,6 +104,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
     private Object mSyncLock;
     private int mStActiveUicc;
     private int mStActiveeSe;
+    private int mStActiveNdefNfcee;
     private StNativeNfcManager mNativeNfcManager;
     private MyContentProviderUtil mContentProviderUtil;
     // private ConfigUtil.IParser mConfigFileParser;
@@ -396,7 +397,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                 Log.d(TAG, "init() - persist.st_nfc_ignore_modem_sim1=1");
             }
 
-            mNativeNfcManager.nfceeDiscover();
+            // mNativeNfcManager.nfceeDiscover();
             RefreshSeStatus(true);
 
             if (!st21HasSim2()) {
@@ -555,14 +556,15 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                         || NfcSimStateObserver.getInstance().isAirplaneModeHidingSimPresence())) {
             onActiveUiccChanged(DesiredUicc, false);
         }
-        if (DesiredeSE != 0x0) {
+
+        if ((DesiredeSE != 0x0) && (mStActiveeSe == 0x00)) {
             mStExtensions.EnableSE(DesiredeSE, true);
             RefreshSeStatus(false);
         }
         // mContentProviderUtil.setAvailableSeList();
 
         // Check NDEF-NFCEE
-        if (mStExtensions.checkNdefNfceeAvailable()) {
+        if (mStExtensions.checkNdefNfceeAvailable() && (mStActiveNdefNfcee == 0x00)) {
             Log.d(TAG, "restorePreviousSe() - NDEF-NFCEE supported, enabling");
 
             // any se_id except one starting with 0x8x will do
@@ -615,7 +617,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
 
                 ActSe = getActiveUiccValue();
 
-                // If SeId =0 (OFF), disable all the enabled SEs.
+                // If SeId =0 (OFF), disable all the enabled SIMs.
                 if (SeID == 0) {
                     for (Map.Entry<Integer, String> entry : SeList.entrySet()) {
                         Log.d(
@@ -627,7 +629,8 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                         if ((entry.getValue().equals(SE_STATE_ACTIVATED))
                                 && (entry.getKey() != 0x82)
                                 && (entry.getKey() != 0x84)
-                                && (entry.getKey() != 0x86)) {
+                                && (entry.getKey() != 0x86)
+                                && (entry.getKey() != 0x10)) {
                             if (false == mStExtensions.EnableSE(entry.getKey(), false)) errors++;
                         }
                     }
@@ -816,7 +819,8 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
         int eSeId = 0x00;
         mStActiveUicc = 0;
         mStActiveeSe = 0;
-        int num = mStExtensions.getAvailableHciHostList(nfceeid, conInfo);
+        mStActiveNdefNfcee = 0;
+        int num = mStExtensions.getAvailableNfceeList(nfceeid, conInfo);
 
         Log.d(
                 TAG,
@@ -856,6 +860,7 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
             int i;
             for (i = 0; i < num; i++) {
                 String s = nciStateToString(conInfo[i] & 0xFF);
+
                 if (!NfcSimStateObserver.getInstance().isAirplaneModeHidingSimPresence()) {
                     if (((nfceeid[i] & 0xFF) == 0x81)
                             && (mSim1Presence == NfcSimStateObserver.STATE_ABSENT)) {
@@ -871,12 +876,16 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                             || ((nfceeid[i] & 0xFF) == 0x84)
                             || ((nfceeid[i] & 0xFF) == 0x86)) {
                         mStActiveeSe = (nfceeid[i] & 0xFF);
-                    } else {
+                    } else if (((nfceeid[i] & 0xFF) == 0x81)
+                            || ((nfceeid[i] & 0xFF) == 0x83)
+                            || ((nfceeid[i] & 0xFF) == 0x85)) {
                         if (mStActiveUicc == 0) {
                             mStActiveUicc = (nfceeid[i] & 0xFF);
                         } else {
                             mStActiveUicc = 0xFF;
                         }
+                    } else if ((nfceeid[i] & 0xFF) == 0x10) {
+                        mStActiveNdefNfcee = (nfceeid[i] & 0xFF);
                     }
                 }
             }
@@ -886,7 +895,9 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                 "RefreshSeStatus() - mStActiveeSe = "
                         + String.format("0x%02X", mStActiveeSe)
                         + " mStActiveUicc = "
-                        + String.format("0x%02X", mStActiveUicc));
+                        + String.format("0x%02X", mStActiveUicc)
+                        + ", mStActiveNdefNfcee = "
+                        + String.format("0x%02X", mStActiveNdefNfcee));
 
         Log.d(
                 TAG,

@@ -22,14 +22,15 @@ import android.content.Intent;
 import android.content.ServiceConnection;
 import android.nfc.cardemulation.HostNfcFService;
 import android.nfc.cardemulation.NfcFServiceInfo;
+import android.nfc.cardemulation.Utils;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Message;
 import android.os.Messenger;
 import android.os.RemoteException;
-import android.os.SystemProperties;
 import android.os.UserHandle;
+import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
 import com.android.nfcstm.NfcService;
@@ -39,7 +40,7 @@ import java.io.PrintWriter;
 
 public class HostNfcFEmulationManager {
     static final String TAG = "HostNfcFEmulationManager";
-    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
 
     static final int STATE_IDLE = 0;
     static final int STATE_W4_SERVICE = 1;
@@ -153,10 +154,16 @@ public class HostNfcFEmulationManager {
                         mPendingPacket = data;
                         mState = STATE_W4_SERVICE;
                     }
+
+                    int uid = -1;
+                    if (resolvedService != null) {
+                        uid = resolvedService.getUid();
+                    }
                     NfcStatsLog.write(
                             NfcStatsLog.NFC_CARDEMULATION_OCCURRED,
                             NfcStatsLog.NFC_CARDEMULATION_OCCURRED__CATEGORY__HCE_PAYMENT,
-                            "HCEF");
+                            "HCEF",
+                            uid);
                     break;
                 case STATE_W4_SERVICE:
                     Log.d(TAG, "onHostEmulationData() - Unexpected packet in STATE_W4_SERVICE");
@@ -430,7 +437,8 @@ public class HostNfcFEmulationManager {
      */
     void dumpDebug(ProtoOutputStream proto) {
         if (mServiceBound) {
-            mServiceName.dumpDebug(proto, HostNfcFEmulationManagerProto.SERVICE_NAME);
+            Utils.dumpDebugComponentName(
+                    mServiceName, proto, HostNfcFEmulationManagerProto.SERVICE_NAME);
         }
     }
 }
