@@ -223,7 +223,9 @@ public class HostEmulationManager {
                     // Resolve to default
                     // Check if resolvedService requires unlock
                     StApduServiceInfo defaultServiceInfo = resolveInfo.defaultService;
-                    if (defaultServiceInfo.requiresUnlock() && mKeyguard.isKeyguardLocked()) {
+                    if ((defaultServiceInfo.requiresUnlock()
+                                    || NfcService.getInstance().isSecureNfcEnabled())
+                            && mKeyguard.isKeyguardLocked()) {
                         NfcService.getInstance().sendRequireUnlockIntent();
                         NfcService.getInstance().sendData(AID_NOT_FOUND);
                         if (DBG) Log.d(TAG, "onHostEmulationData() - !show toast");

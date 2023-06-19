@@ -180,8 +180,8 @@ SyncEvent gIsReconfiguringDiscovery;
 
 namespace android {
 static jint sLastError = ERROR_BUFFER_TOO_SMALL;
-SyncEvent sNfaEnableEvent;   // event for NFA_Enable()
-SyncEvent sNfaDisableEvent;  // event for NFA_Disable()
+SyncEvent sNfaEnableEvent;                       // event for NFA_Enable()
+SyncEvent sNfaDisableEvent;                      // event for NFA_Disable()
 static SyncEvent sNfaEnableDisablePollingEvent;  // event for
                                                  // NFA_EnablePolling(),
                                                  // NFA_DisablePolling()

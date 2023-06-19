@@ -2605,6 +2605,9 @@ int NfcStExtensions::getAvailableNfceeList(uint8_t* nfceeId, uint8_t* conInfo) {
 
   for (int i = 0; i < nb; i++) {
     if (nfceeId[i] == StRoutingManager::getInstance().getDisconnectedUiccId()) {
+      LOG(INFO) << StringPrintf(
+          "%s; UICC 0x%02X was disconnected for routing purpose", __func__,
+          nfceeId[i]);
       conInfo[i] = NFA_EE_STATUS_ACTIVE;
     }
   }

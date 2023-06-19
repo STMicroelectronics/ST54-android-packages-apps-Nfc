@@ -796,28 +796,32 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
 
     @Override
     public void onHwErrorReported() {
-        if (DBG) Log.d(TAG, "onHwErrorReported() - Restarting NFC Service");
-        try {
-            mContext.unregisterReceiver(mReceiver);
-        } catch (IllegalArgumentException e) {
-            Log.w(
-                    TAG,
-                    "onHwErrorReported() - Failed to unregisterScreenState BroadCastReceiver: "
-                            + e);
-        }
-        mIsRecovering = true;
+        if (mIsRecovering == false) {
+            if (DBG) Log.d(TAG, "onHwErrorReported() - Restarting NFC Service");
 
-        if (mNfcStackRestartCb != null) {
-            // Inform any listening app
             try {
-                mNfcStackRestartCb.onNfcStackRestart();
-            } catch (RemoteException e) {
-                Log.e(TAG, "onHwErrorReported() - e: " + e.toString());
+                mContext.unregisterReceiver(mReceiver);
+            } catch (IllegalArgumentException e) {
+                Log.w(
+                        TAG,
+                        "onHwErrorReported() - Failed to unregisterScreenState BroadCastReceiver: "
+                                + e);
             }
-        }
 
-        new EnableDisableTask().execute(TASK_DISABLE);
-        new EnableDisableTask().execute(TASK_ENABLE);
+            mIsRecovering = true;
+
+            if (mNfcStackRestartCb != null) {
+                // Inform any listening app
+                try {
+                    mNfcStackRestartCb.onNfcStackRestart();
+                } catch (RemoteException e) {
+                    Log.e(TAG, "onHwErrorReported() - e: " + e.toString());
+                }
+            }
+
+            new EnableDisableTask().execute(TASK_DISABLE);
+            new EnableDisableTask().execute(TASK_ENABLE);
+        }
     }
 
     final class ReaderModeParams {
@@ -1690,6 +1694,8 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                 filter.addAction(Intent.ACTION_USER_PRESENT);
                 filter.addAction(Intent.ACTION_USER_SWITCHED);
                 filter.addAction(Intent.ACTION_USER_ADDED);
+                filter.addAction(Intent.ACTION_POWER_CONNECTED);
+                filter.addAction(Intent.ACTION_POWER_DISCONNECTED);
                 mContext.registerReceiverForAllUsers(mReceiver, filter, null, null);
                 mIsRecovering = false;
             }
@@ -2623,6 +2629,12 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             int remainingSize = mDeviceHost.getRemainingAidTableSize();
             Log.d(TAG, "StNfcAdapterService - getAvailableSpaceForAid(): size:" + remainingSize);
             return remainingSize;
+        }
+    }
+
+    public boolean isSecureNfcEnabled() {
+        synchronized (NfcService.this) {
+            return mIsSecureNfcEnabled;
         }
     }
 

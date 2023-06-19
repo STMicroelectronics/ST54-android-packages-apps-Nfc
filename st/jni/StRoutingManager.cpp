@@ -1103,7 +1103,7 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
 **
 *******************************************************************************/
 void StRoutingManager::updateRoutingTable() {
-  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(); enter";
+  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(enter); ";
 
   setVarDefaultRoutes();
   // If no UICC route
@@ -1133,6 +1133,7 @@ void StRoutingManager::updateRoutingTable() {
   mSeTechMask = updateEeTechRouteSetting();
   updateDefaultProtocolRoute();
   updateDefaultRoute();
+  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(exit); ";
 }
 
 /*******************************************************************************
@@ -3044,11 +3045,7 @@ void StRoutingManager::setEeInfoChangedFlag() {
 ** Returns:         None
 **
 *******************************************************************************/
-uint8_t StRoutingManager::getDisconnectedUiccId() {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; mDisconnectedUicc = 0x%02X", __func__, mDisconnectedUicc);
-  return mDisconnectedUicc;
-}
+uint8_t StRoutingManager::getDisconnectedUiccId() { return mDisconnectedUicc; }
 
 /*******************************************************************************
 **

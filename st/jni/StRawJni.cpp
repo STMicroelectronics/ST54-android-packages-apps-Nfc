@@ -58,6 +58,11 @@ extern int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded);
 extern void (*g_pRawJniUnload)();
 }  // namespace android
 
+static SyncEvent sExtRawLib;
+static void *mRawHandle = NULL;
+static int (*mRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
+                              size_t *) = NULL;
+
 /*******************************************************************************
 **
 ** Function:        nativeNfcTag_registerNdefTypeHandler
@@ -81,11 +86,16 @@ static void rawNfaConnectionCallback(uint8_t connEvent,
   sExtRawEvent.end();
 }
 
-static SyncEvent sExtRawLib;
-static void *mRawHandle = NULL;
-static int (*mRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
-                              size_t *) = NULL;
-
+/*******************************************************************************
+**
+** Function:        rawJniUnload
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 static void rawJniUnload() {
   sExtRawLib.start();
   mRawJniSeqSplit = NULL;

@@ -50,8 +50,6 @@ extern void startRfDiscovery(bool isStart);
 
 StNdefNfcee StNdefNfcee::sStNdefNfcee;
 
-#define NDEF_T4T_AID 0xD2, 0x76, 0x00, 0x00, 0x85, 0x01, 0x01
-
 /*******************************************************************************
  **
  ** Function:        StNdefNfcee
@@ -263,9 +261,8 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
     case NFA_EE_REMOVE_AID_EVT: {
       DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
           "%s; NFA_EE_REMOVE_AID_EVT  status=%u", fn, eventData->status);
+      StRoutingManager::getInstance().notifyAidAdded();
     } break;
-
-      break;
 
       // Events not processed by this object
     case NFA_EE_ADD_SYSCODE_EVT:
@@ -870,7 +867,7 @@ bool StNdefNfcee::getFileContent(uint8_t fileId[2], uint32_t* len,
  ** Returns:         true if success
  **
  *******************************************************************************/
-bool StNdefNfcee::lockFile(uint8_t fileId[2], bool writable) {
+bool StNdefNfcee::lockFile(uint8_t fileId[2], bool locked) {
   int idx = checkFileId(fileId);
   uint8_t selectCcCmd[] = {0x00, 0xA4, 0x00, 0x0C, 0x02, 0xE1, 0x03};
   uint8_t updateBinaryByteCmd[] = {0x00, 0xD6, 0x00, 0x00, 0x01, 0x00};
@@ -884,9 +881,9 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool writable) {
 
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; set writable:%d for file %02hhx%02hhx", __func__,
-                      writable, fileId[0], fileId[1]);
+                      !locked, fileId[0], fileId[1]);
 
-  if (mCCInfo[idx].wr_access == writable) {
+  if (mCCInfo[idx].wr_access == !locked) {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; Already in requested state, exiting", __func__);
     return true;
@@ -903,7 +900,7 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool writable) {
 
   /* Update just 1 byte */
   updateBinaryByteCmd[3] = mCCInfo[idx].offset_wr_byte;
-  updateBinaryByteCmd[5] = writable ? 0x00 : 0xFF;
+  updateBinaryByteCmd[5] = !locked ? 0x00 : 0xFF;
   res =
       transceive(sizeof(updateBinaryByteCmd), updateBinaryByteCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
@@ -914,7 +911,7 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool writable) {
   }
 
   /* Update the cached structure accordingly */
-  mCCInfo[idx].wr_access = writable;
+  mCCInfo[idx].wr_access = !locked;
 
   return true;
 }
@@ -970,17 +967,17 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
     return false;
   }
 
-  if (isLockedNdefData(fileId)) {
-    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
-        "%s; File is not writable, please call lockFile() first", __func__);
-    return false;
-  }
-
   /* can the new content fit in the file ? */
   if (buflen + 2 > mCCInfo[idx].size) {
     DLOG_IF(ERROR, nfc_debug_enabled)
         << StringPrintf("%s; file is too small for this content (%hd > %d)",
                         __func__, buflen, mCCInfo[idx].size - 2);
+    return false;
+  }
+
+  if (isLockedNdefData(fileId)) {
+    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
+        "%s; File is not writable, please call lockFile() first", __func__);
     return false;
   }
 
