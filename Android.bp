@@ -53,5 +53,5 @@ android_app {
     optimize: {
         enabled: false,
     },
-
+    jarjar_rules: "jarjar-rules.txt",
 }
