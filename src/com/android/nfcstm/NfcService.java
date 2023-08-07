@@ -6316,19 +6316,30 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
             switch (msg.what) {
                 case MSG_ROUTE_AID:
                     {
-                        if (DBG) Log.d(TAG, "NfcServiceHandler - handleMessage(MSG_ROUTE_AID)");
-                        int route = msg.arg1;
-                        int aidInfo = msg.arg2;
-                        String aid = (String) msg.obj;
+                        synchronized (NfcService.this) {
+                            if (mState != NfcAdapter.STATE_ON) {
+                                if (DBG)
+                                    Log.d(
+                                            TAG,
+                                            "NfcServiceHandler - handleMessage(MSG_ROUTE_AID) - NFC Service is not on, exiting");
+                                return;
+                            }
 
-                        int power = 0x00;
-                        Bundle bundle = msg.getData();
-                        if (bundle != null) {
-                            power = bundle.getInt(MSG_ROUTE_AID_PARAM_TAG);
+                            if (DBG)
+                                Log.d(TAG, "NfcServiceHandler - handleMessage(MSG_ROUTE_AID)");
+                            int route = msg.arg1;
+                            int aidInfo = msg.arg2;
+                            String aid = (String) msg.obj;
+
+                            int power = 0x00;
+                            Bundle bundle = msg.getData();
+                            if (bundle != null) {
+                                power = bundle.getInt(MSG_ROUTE_AID_PARAM_TAG);
+                            }
+
+                            mDeviceHost.routeAid(hexStringToBytes(aid), route, aidInfo, power);
                         }
 
-                        mDeviceHost.routeAid(hexStringToBytes(aid), route, aidInfo, power);
-                        // Restart polling config
                         break;
                     }
                 case MSG_UNROUTE_AID:
