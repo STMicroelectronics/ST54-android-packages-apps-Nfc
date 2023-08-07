@@ -115,6 +115,8 @@ public class RegisteredServicesCache {
 
     String mLastAddedPackage = null;
 
+    ArrayList<String> mComponentList = new ArrayList<>();
+
     public interface Callback {
         /** ServicesUpdated for specific userId. */
         void onServicesUpdated(
@@ -385,6 +387,11 @@ public class RegisteredServicesCache {
             }
         }
 
+        // Check if in component list
+        if (mComponentList.contains(pkg)) {
+            return true;
+        }
+
         return false;
     }
 
@@ -554,6 +561,7 @@ public class RegisteredServicesCache {
             /** *************************** */
             /* Fill services entry */
             /** *************************** */
+            mComponentList.clear();
             for (StApduServiceInfo service : validServices) {
                 if (DBG)
                     Log.d(
@@ -573,6 +581,7 @@ public class RegisteredServicesCache {
                 }
 
                 userServices.services.put(service.getComponent(), service);
+                mComponentList.add(name.getPackageName());
             }
 
             if (mLastAddedPackage != null) {
