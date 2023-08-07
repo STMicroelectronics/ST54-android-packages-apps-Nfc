@@ -116,6 +116,8 @@ public class RegisteredServicesCache {
 
     String mLastAddedPackage = null;
 
+    ArrayList<String> mComponentList = new ArrayList<>();
+
     public interface Callback {
         /** ServicesUpdated for specific userId. */
         void onServicesUpdated(
@@ -180,6 +182,17 @@ public class RegisteredServicesCache {
                             String pkg = uri != null ? uri.getSchemeSpecificPart() : null;
 
                             if (DBG) Log.d(TAG, "onReceive() - pkg: " + pkg);
+
+                            // Check if pkg is an APDU service
+                            // If not, no processing needed
+                            if (!checkIfApduService(pkg, UserHandle.getUserId(uid))
+                                    && !Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                                if (DBG)
+                                    Log.d(
+                                            TAG,
+                                            "onReceive() - Ignoring intent due to package not being APDU service");
+                                return;
+                            }
 
                             if (Intent.ACTION_PACKAGE_ADDED.equals(action)) {
                                 mLastAddedPackage = pkg;
@@ -325,6 +338,55 @@ public class RegisteredServicesCache {
         if (DBG) Log.d(TAG, "getStServicesForCategory() - found " + services.size() + " services");
 
         return services;
+    }
+
+    boolean checkIfApduService(String pkg, int userId) {
+        PackageManager pm;
+        try {
+            pm =
+                    mContext.createPackageContextAsUser("android", 0, new UserHandle(userId))
+                            .getPackageManager();
+        } catch (NameNotFoundException e) {
+            Log.e(TAG, "checkIfApduService() - Could not create user package context");
+            return false;
+        }
+
+        ArrayList<StApduServiceInfo> validServices = new ArrayList<StApduServiceInfo>();
+
+        List<ResolveInfo> resolvedServices =
+                new ArrayList<>(
+                        pm.queryIntentServicesAsUser(
+                                new Intent(HostApduService.SERVICE_INTERFACE),
+                                PackageManager.GET_META_DATA,
+                                userId));
+
+        List<ResolveInfo> resolvedOffHostServices =
+                pm.queryIntentServicesAsUser(
+                        new Intent(OffHostApduService.SERVICE_INTERFACE),
+                        PackageManager.GET_META_DATA,
+                        userId);
+        resolvedServices.addAll(resolvedOffHostServices);
+
+        for (ResolveInfo resolvedService : resolvedServices) {
+            try {
+                ServiceInfo si = resolvedService.serviceInfo;
+                String apduPkg = si.packageName.toString();
+                if (apduPkg.contains(pkg)) {
+                    if (DBG)
+                        Log.d(TAG, "checkIfApduService() - " + apduPkg + " is an APDU service");
+                    return true;
+                }
+            } catch (Exception e) {
+
+            }
+        }
+
+        // Check if in component list
+        if (mComponentList.contains(pkg)) {
+            return true;
+        }
+
+        return false;
     }
 
     ArrayList<StApduServiceInfo> getInstalledStServices(int userId) {
@@ -484,6 +546,7 @@ public class RegisteredServicesCache {
             /** *************************** */
             /* Fill services entry */
             /** *************************** */
+            mComponentList.clear();
             for (StApduServiceInfo service : validServices) {
                 if (DBG)
                     Log.d(
@@ -503,6 +566,7 @@ public class RegisteredServicesCache {
                 }
 
                 userServices.services.put(service.getComponent(), service);
+                mComponentList.add(name.getPackageName());
             }
 
             if (mLastAddedPackage != null) {
