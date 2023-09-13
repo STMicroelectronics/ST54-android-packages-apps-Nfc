@@ -1,4 +1,3 @@
-// START system version
 cc_library_static {
     name: "libstnfc_jni",
 
@@ -118,4 +117,3 @@ cc_library_static {
       ],
 
 }
-// END system version

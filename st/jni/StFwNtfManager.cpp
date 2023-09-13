@@ -1736,7 +1736,7 @@ void StFwNtfManager::notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata) {
  *******************************************************************************/
 bool StFwNtfManager::needMatchSwForNfceeActionNtf() {
   // TER 22444 since FW 1.17.8643 (ST21NFCD) adds proprietary ntf with SW
-  // included.
+  // included, in that case we disable the stack mechanism to save resources.
 
   bool ter22444 = false;
 
@@ -1748,9 +1748,12 @@ bool StFwNtfManager::needMatchSwForNfceeActionNtf() {
     }
 
   } else if ((NfcStExtensions::getInstance().mHwInfo & 0xFF00) == 0x0500) {
-    // ST54J/K -- since ???
+    // ST54J/K -- since 3.10.8843
+    if ((NfcStExtensions::getInstance().mFwInfo & 0x00FF0000) >= 0x00100000) {
+      ter22444 = true;
+    }
   } else {
-    // newer chips: assumed to be by default.
+    // newer chips: always supported.
     ter22444 = true;
   }
 

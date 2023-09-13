@@ -102,6 +102,9 @@ class StRoutingManager {
   void setVarDefaultRoutes();
   bool checkIfUiccRoute();
 
+  void triggerOnHostEmulationData(uint8_t technology);
+  static void notifyOnHostEmulationData(void* data);
+
   // Every routing table entry is matched exact (BCM20793)
   static const int AID_MATCHING_EXACT_ONLY = 0x00;
   // Every routing table entry can be matched either exact or prefix
@@ -193,6 +196,10 @@ class StRoutingManager {
   uint8_t mMuteTechBitmap;
 
   uint16_t mRemainingLmrtSize;
+  struct OnHostEmulationDataData {
+    uint8_t hceDataTech;
+    std::vector<uint8_t>* rxDataBuffer;
+  };
 
   tNFA_EE_CBACK_DATA mCbEventData;
   tNFA_EE_DISCOVER_REQ mEeInfo;

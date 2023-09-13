@@ -650,7 +650,7 @@ void* prio_logic_poll_reconf(void* arg) {
 
 /*******************************************************************************
 **
-** Function:        reconfigure_poll_cb
+** Function:        restore_poll_cb
 **
 ** Description:
 **
@@ -674,7 +674,7 @@ void restore_poll_cb(union sigval) {
 
 /*******************************************************************************
 **
-** Function:        clear_multiprotocol
+** Function:        start_poll_reconf_thread
 **
 ** Description:     Handle RF-discovery events from the stack.
 **                  discoveredDevice: Discovered device.
@@ -699,7 +699,7 @@ void start_poll_reconf_thread() {
 
 /*******************************************************************************
 **
-** Function:        multiprotocol_clear_flag
+** Function:        poll_reconf_clear_flag
 **
 ** Description:     Handle RF-discovery events from the stack.
 **                  discoveredDevice: Discovered device.
@@ -1698,7 +1698,6 @@ void nfaDeviceManagementCallback(uint8_t dmEvent,
         PowerSwitch::getInstance().abort();
 
         if (!sIsDisabling && sIsNfaEnabled) {
-          //       EXTNS_Close();
           NFA_Disable(FALSE);
           sIsDisabling = true;
         } else {
@@ -2512,7 +2511,7 @@ static jboolean stNfcManager_doDeinitialize(JNIEnv*, jobject) {
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
 
   // Added mutext to protect variable for cases where
-  // p2p_prio_logic_multiprotocol might launch
+  // prio_logic_poll_reconf might launch
   gIsReconfiguringDiscovery.start();
   sIsDisabling = true;
   gIsReconfiguringDiscovery.end();
@@ -3217,6 +3216,7 @@ static void stNfcManager_doSetScreenState(JNIEnv* e, jobject o,
   uint8_t state = (screen_state_mask & NFA_SCREEN_STATE_MASK);
   uint8_t discovry_param =
       NCI_LISTEN_DH_NFCEE_ENABLE_MASK | NCI_POLLING_DH_ENABLE_MASK;
+  int32_t delay_bridge = 0;
 
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; state = %d prevScreenState= %d, discovry_param = %d",
@@ -3283,8 +3283,18 @@ static void stNfcManager_doSetScreenState(JNIEnv* e, jobject o,
         NCI_LISTEN_DH_NFCEE_ENABLE_MASK | NCI_POLLING_DH_ENABLE_MASK;
   }
 
+  if (discovry_param & NCI_POLLING_DH_ENABLE_MASK) {
+    delay_bridge = property_get_int32("persist.st_nfc_delay_bridge", 0);
+  }
+
   gMutexConfig.lock();
   SyncEventGuard guard(gNfaSetConfigEvent);
+  if (delay_bridge != 0) {
+    DLOG_IF(INFO, nfc_debug_enabled)
+        << StringPrintf("%s; Waiting %d ms before calling NFA_SetConfig()",
+                        __func__, delay_bridge);
+    gNfaSetConfigEvent.wait(delay_bridge);
+  }
   status = NFA_SetConfig(NCI_PARAM_ID_CON_DISCOVERY_PARAM,
                          NCI_PARAM_LEN_CON_DISCOVERY_PARAM, &discovry_param);
   if (status == NFA_STATUS_OK) {
@@ -3855,6 +3865,7 @@ void startRfDiscovery(bool isStart) {
 
   DLOG_IF(INFO, nfc_debug_enabled)
       << StringPrintf("%s; is start = %d", __func__, isStart);
+
   nativeNfcTag_acquireRfInterfaceMutexLock();
   SyncEventGuard guard(sNfaEnableDisablePollingEvent);
 

@@ -1204,6 +1204,14 @@ static jint nativeNfcTag_doReconnect(JNIEnv*, jobject) {
 
   gIsReconfiguringDiscovery.start();
 
+  if ((sCurrentConnectedTargetProtocol == NFC_PROTOCOL_UNKNOWN) &&
+      (sCurrentConnectedTargetType != TARGET_TYPE_ISO14443_3B)) {
+    LOG(ERROR) << StringPrintf("%s; Current connected target protocol unknown",
+                               __func__);
+    retCode = NFCSTATUS_FAILED;
+    goto TheEnd;
+  }
+
   if (sIsDisconnecting) {
     LOG(ERROR) << StringPrintf("%s; Disconnect in progress", __func__);
     retCode = NFCSTATUS_FAILED;
@@ -1313,10 +1321,6 @@ jboolean nativeNfcTag_doDisconnect(JNIEnv*, jobject) {
   if (checkIfPollReconfNeeded()) {
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s; Discovery restarted, skip deactivate", __func__);
-    goto TheEnd;
-  }
-
-  if (NFC_PROTOCOL_KOVIO == sCurrentActivatedProtocl) {
     goto TheEnd;
   }
 

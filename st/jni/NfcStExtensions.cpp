@@ -339,6 +339,8 @@ void NfcStExtensions::notifyRestart() {
     }
 
     if (ins.mIsEseReset && ((ins.mHwInfo & 0xFF00) != 0x0400)) {
+      // Need to stop the eSE before sending the command
+      StSecureElement::getInstance().EnableSE(resetSyncId[0], false);
       // No need to reset for ST54H, the CLF reset will reset the eSE.
       ins.sendPropTestCmd(OID_ST_TEST_CMD, PROP_TEST_RESET_ST54J_SE,
                           resetSyncId, 0, recvBuffer, recvBufferActualSize);
