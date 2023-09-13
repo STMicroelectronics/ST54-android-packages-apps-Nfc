@@ -102,7 +102,7 @@ public class AppChooserActivity extends AppCompatActivity
         final NfcAdapter adapter = NfcAdapter.getDefaultAdapter(this);
         mCardEmuManager = CardEmulation.getInstance(adapter);
 
-        final ActivityManager am = getSystemService(ActivityManager.class);
+        final ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
         mIconSize = am.getLauncherLargeIconSize();
 
         // Three cases:
@@ -214,7 +214,7 @@ public class AppChooserActivity extends AppCompatActivity
         private List<DisplayAppInfo> mList;
 
         public ListAdapter(Context context, ArrayList<StApduServiceInfo> services) {
-            mInflater = context.getSystemService(LayoutInflater.class);
+            mInflater = (LayoutInflater) context.getSystemService(Context.LAYOUT_INFLATER_SERVICE);
             // For each component, get the corresponding app name and icon
             PackageManager pm = getPackageManager();
             mList = new ArrayList<DisplayAppInfo>();

@@ -32,7 +32,8 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import androidx.appcompat.widget.Toolbar;
-import com.android.nfcstm.cardemulation.util.AlertActivity;
+import com.android.internal.app.AlertActivity;
+import com.android.internal.app.AlertController;
 import com.st.android.nfc_extensions.StApduServiceInfo;
 
 public class TapAgainDialog extends AlertActivity implements DialogInterface.OnClickListener {
@@ -68,9 +69,15 @@ public class TapAgainDialog extends AlertActivity implements DialogInterface.OnC
         IntentFilter filter = new IntentFilter(ACTION_CLOSE);
         filter.addAction(Intent.ACTION_SCREEN_OFF);
         registerReceiver(mReceiver, filter);
+        AlertController.AlertParams ap = mAlertParams;
 
-        View view = getLayoutInflater().inflate(com.android.nfcstm.R.layout.tapagain, null);
-        Toolbar toolbar = (Toolbar) view.findViewById(com.android.nfcstm.R.id.tap_again_toolbar);
+        ap.mTitle = "";
+        ap.mView = getLayoutInflater().inflate(com.android.nfcstm.R.layout.tapagain, null);
+
+        PackageManager pm = getPackageManager();
+
+        Toolbar toolbar =
+                (Toolbar) ap.mView.findViewById(com.android.nfcstm.R.id.tap_again_toolbar);
         toolbar.setNavigationIcon(getDrawable(com.android.nfcstm.R.drawable.ic_close));
         toolbar.setNavigationOnClickListener(
                 new View.OnClickListener() {
@@ -80,17 +87,13 @@ public class TapAgainDialog extends AlertActivity implements DialogInterface.OnC
                     }
                 });
 
-        PackageManager pm = getPackageManager();
-        ImageView iv = (ImageView) view.findViewById(com.android.nfcstm.R.id.tap_again_appicon);
+        ImageView iv = (ImageView) ap.mView.findViewById(com.android.nfcstm.R.id.tap_again_appicon);
         Drawable icon =
                 pm.getUserBadgedIcon(
                         serviceInfo.loadIcon(pm),
                         UserHandle.getUserHandleForUid(serviceInfo.getUid()));
 
         iv.setImageDrawable(icon);
-
-        mAlertBuilder.setTitle("");
-        mAlertBuilder.setView(view);
 
         setupAlert();
         Window window = getWindow();

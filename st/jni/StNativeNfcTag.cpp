@@ -24,7 +24,7 @@
 #include <signal.h>
 #include <string.h>
 #include <time.h>
-
+#include <string>
 #include "IntervalTimer.h"
 #include "JavaClassConstants.h"
 #include "Mutex.h"
@@ -163,6 +163,8 @@ void nativeNfcTag_cacheNonNciCardDetection();
 void nativeNfcTag_handleNonNciCardDetection(tNFA_CONN_EVT_DATA* eventData);
 void nativeNfcTag_handleNonNciMultiCardDetection(uint8_t connEvent,
                                                  tNFA_CONN_EVT_DATA* eventData);
+void nativeNfcTag_doPresenceCheckResult(tNFA_STATUS status);
+
 void nativeNfcTag_setP2pPrioLogic(bool status);
 static void nonNciCardTimerProc(union sigval);
 static bool sIsCheckingNDef = false;
@@ -209,10 +211,7 @@ void nativeNfcTag_abortWaits() {
   sCheckNdefStatus = NFA_STATUS_FAILED;
 
   sem_post(&sCheckNdefSem);
-  {
-    SyncEventGuard guard(sPresenceCheckEvent);
-    sPresenceCheckEvent.notifyOne();
-  }
+  { nativeNfcTag_doPresenceCheckResult(NFA_STATUS_FAILED); }
   sem_post(&sMakeReadonlySem);
   sCurrentRfInterface = NFA_INTERFACE_ISO_DEP;
   sCurrentActivatedProtocl = NFA_INTERFACE_ISO_DEP;
@@ -864,6 +863,12 @@ static jint nativeNfcTag_doConnect(JNIEnv*, jobject, jint targetHandle) {
     }
   }
 
+  // // If last handle, clear NDEF detection tiemout flag to enable future
+  // // attemtps at reselection
+  // if(targetHandle == (natTag.mNumTechList - 1)){
+  //   natTag.resetNdefDetectionTimedOut();
+  // }
+
 TheEnd:
   gIsReconfiguringDiscovery.end();
   DLOG_IF(INFO, nfc_debug_enabled)
@@ -1122,8 +1127,14 @@ int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded) {
 
     sReselectIdleTag = false;
     if (sConnectOk) {
-      rVal = 0;  // success
-                 //            sCurrentRfInterface = rfInterface;
+      if (sCurrentRfInterface == rfInterface) {
+        rVal = 0;  // success
+      } else {
+        LOG(ERROR) << StringPrintf(
+            "%s; Connected interface is 0x%02X, requested interface: 0x%02X",
+            __func__, sCurrentRfInterface, rfInterface);
+        rVal = 1;
+      }
       break;
     } else {
       rVal = 1;
@@ -1198,6 +1209,14 @@ static jint nativeNfcTag_doReconnect(JNIEnv*, jobject) {
   NfcTag& natTag = NfcTag::getInstance();
 
   gIsReconfiguringDiscovery.start();
+
+  if ((sCurrentConnectedTargetProtocol == NFC_PROTOCOL_UNKNOWN) &&
+      (sCurrentConnectedTargetType != TARGET_TYPE_ISO14443_3B)) {
+    LOG(ERROR) << StringPrintf("%s; Current connected target protocol unknown",
+                               __func__);
+    retCode = NFCSTATUS_FAILED;
+    goto TheEnd;
+  }
 
   if (sIsDisconnecting) {
     LOG(ERROR) << StringPrintf("%s; Disconnect in progress", __func__);

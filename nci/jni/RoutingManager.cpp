@@ -114,10 +114,6 @@ RoutingManager::RoutingManager()
       NfcConfig::getUnsigned(NAME_HOST_LISTEN_TECH_MASK,
                              NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_F);
 
-  mOffHostListenTechMask = NfcConfig::getUnsigned(
-      NAME_OFFHOST_LISTEN_TECH_MASK,
-      NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B | NFA_TECHNOLOGY_MASK_F);
-
   memset(&mEeInfo, 0, sizeof(mEeInfo));
   mReceivedEeInfo = false;
   mSeTechMask = 0x00;
@@ -720,10 +716,6 @@ tNFA_TECHNOLOGY_MASK RoutingManager::updateEeTechRouteSetting() {
         seTechMask |= NFA_TECHNOLOGY_MASK_F;
     }
 
-    // If OFFHOST_LISTEN_TECH_MASK exists,
-    // filter out the unspecified technologies
-    seTechMask &= mOffHostListenTechMask;
-
     DLOG_IF(INFO, nfc_debug_enabled)
         << StringPrintf("%s: seTechMask[%u]=0x%02x", fn, i, seTechMask);
     if (seTechMask != 0x00) {
@@ -1061,14 +1053,14 @@ void RoutingManager::nfcFCeCallback(uint8_t event,
   switch (event) {
     case NFA_CE_REGISTERED_EVT: {
       DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: registered event notified", fn);
+          << StringPrintf("%s: registerd event notified", fn);
       routingManager.mNfcFOnDhHandle = eventData->ce_registered.handle;
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
     case NFA_CE_DEREGISTERED_EVT: {
       DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s: deregistered event notified", fn);
+          << StringPrintf("%s: deregisterd event notified", fn);
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;

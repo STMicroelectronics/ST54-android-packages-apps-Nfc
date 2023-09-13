@@ -72,6 +72,7 @@ static IntervalTimer gTechReconfTimer;
 static tNFA_EE_DISCOVER_REQ gTempEeInfo;
 static Mutex sEeInfoMutex;
 static Mutex sEeInfoChangedMutex;
+typedef void* (*THREADFUNCPTR)(void*);
 
 /*******************************************************************************
 **
@@ -839,6 +840,83 @@ void StRoutingManager::notifyDefaultRouteSet(int aidRoute, int mifareRoute,
 }
 
 /*******************************************************************************
+ **
+ ** Function:        triggerOnHostEmulationData
+ **
+ ** Description:    starts a thread for calling notifyOnHostEmulationData.
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void StRoutingManager::triggerOnHostEmulationData(uint8_t technology) {
+  pthread_attr_t pa;
+  pthread_t p;
+
+  // Create a temporary copy of the data to be used by the thread to avoid
+  // corruption risk
+  OnHostEmulationDataData* data = new OnHostEmulationDataData();
+  data->hceDataTech = technology;
+  data->rxDataBuffer = new std::vector<uint8_t>(mRxDataBuffer);
+
+  // create detached thread to call notifyOnHostEmulationData
+  (void)pthread_attr_init(&pa);
+  (void)pthread_attr_setdetachstate(&pa, PTHREAD_CREATE_DETACHED);
+  (void)pthread_create(
+      &p, &pa, (THREADFUNCPTR)&StRoutingManager::notifyOnHostEmulationData,
+      data);
+  (void)pthread_attr_destroy(&pa);
+}
+
+/*******************************************************************************
+**
+** Function:        notifyOnHostEmulationData
+**
+** Description:     calls gCachedNfcManagerNotifyHostEmuData
+**
+** Returns:         None
+**
+*******************************************************************************/
+void StRoutingManager::notifyOnHostEmulationData(void* data) {
+  JNIEnv* e = NULL;
+  StRoutingManager& ins = StRoutingManager::getInstance();
+  ScopedAttach attach(ins.mNativeData->vm, &e);
+  OnHostEmulationDataData* d = (OnHostEmulationDataData*)data;
+  if (e == NULL) {
+    LOG(ERROR) << __func__ << ";jni env is null";
+    delete d->rxDataBuffer;
+    delete d;
+    return;
+  }
+
+  ScopedLocalRef<jobject> dataJavaArray(
+      e, e->NewByteArray(d->rxDataBuffer->size()));
+  if (dataJavaArray.get() == NULL) {
+    LOG(ERROR) << __func__ << "; fail allocate array";
+    goto TheEnd;
+  }
+
+  e->SetByteArrayRegion((jbyteArray)dataJavaArray.get(), 0,
+                        d->rxDataBuffer->size(),
+                        (jbyte*)(&d->rxDataBuffer->data()[0]));
+  if (e->ExceptionCheck()) {
+    e->ExceptionClear();
+    LOG(ERROR) << __func__ << "; fail fill array";
+    goto TheEnd;
+  }
+
+  e->CallVoidMethod(ins.mNativeData->manager,
+                    android::gCachedNfcManagerNotifyHostEmuData,
+                    (int)d->hceDataTech, dataJavaArray.get());
+  if (e->ExceptionCheck()) {
+    e->ExceptionClear();
+    LOG(ERROR) << __func__ << "; fail notify";
+  }
+TheEnd:
+  delete d->rxDataBuffer;
+  delete d;
+}
+
+/*******************************************************************************
 **
 ** Function:        handleData
 **
@@ -868,37 +946,10 @@ void StRoutingManager::handleData(uint8_t technology, const uint8_t* data,
     goto TheEnd;
   }
 
-  {
-    JNIEnv* e = NULL;
-    ScopedAttach attach(mNativeData->vm, &e);
-    if (e == NULL) {
-      LOG(ERROR) << __func__ << ";jni env is null";
-      goto TheEnd;
-    }
+  // Start separate thread to inform Upper layer of HCE data
+  // Avoid possible deadlocks
+  triggerOnHostEmulationData(technology);
 
-    ScopedLocalRef<jobject> dataJavaArray(
-        e, e->NewByteArray(mRxDataBuffer.size()));
-    if (dataJavaArray.get() == NULL) {
-      LOG(ERROR) << __func__ << "; fail allocate array";
-      goto TheEnd;
-    }
-
-    e->SetByteArrayRegion((jbyteArray)dataJavaArray.get(), 0,
-                          mRxDataBuffer.size(), (jbyte*)(&mRxDataBuffer[0]));
-    if (e->ExceptionCheck()) {
-      e->ExceptionClear();
-      LOG(ERROR) << __func__ << "; fail fill array";
-      goto TheEnd;
-    }
-
-    e->CallVoidMethod(mNativeData->manager,
-                      android::gCachedNfcManagerNotifyHostEmuData,
-                      (int)technology, dataJavaArray.get());
-    if (e->ExceptionCheck()) {
-      e->ExceptionClear();
-      LOG(ERROR) << __func__ << "; fail notify";
-    }
-  }
 TheEnd:
   mRxDataBuffer.clear();
 }
@@ -1103,7 +1154,7 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
 **
 *******************************************************************************/
 void StRoutingManager::updateRoutingTable() {
-  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(); enter";
+  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(enter); ";
 
   setVarDefaultRoutes();
   // If no UICC route
@@ -1133,6 +1184,7 @@ void StRoutingManager::updateRoutingTable() {
   mSeTechMask = updateEeTechRouteSetting();
   updateDefaultProtocolRoute();
   updateDefaultRoute();
+  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(exit); ";
 }
 
 /*******************************************************************************
@@ -3044,11 +3096,7 @@ void StRoutingManager::setEeInfoChangedFlag() {
 ** Returns:         None
 **
 *******************************************************************************/
-uint8_t StRoutingManager::getDisconnectedUiccId() {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; mDisconnectedUicc = 0x%02X", __func__, mDisconnectedUicc);
-  return mDisconnectedUicc;
-}
+uint8_t StRoutingManager::getDisconnectedUiccId() { return mDisconnectedUicc; }
 
 /*******************************************************************************
 **

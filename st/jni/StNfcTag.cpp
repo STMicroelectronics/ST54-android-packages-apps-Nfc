@@ -23,7 +23,7 @@
 #include <log/log.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include <nativehelper/ScopedPrimitiveArray.h>
-#include <statslog_nfc_st.h>
+
 #include "IntervalTimer.h"
 #include "JavaClassConstants.h"
 #include "StNfcJni.h"
@@ -84,7 +84,6 @@ NfcTag::NfcTag()
   memset(mTechParams, 0, sizeof(mTechParams));
   memset(mLastKovioUid, 0, NFC_KOVIO_MAX_LEN);
   memset(&mLastKovioTime, 0, sizeof(timespec));
-  mNfcStatsUtil = new NfcStatsUtil();
   memset(&mActivationParams_t, 0, sizeof(activationParams_t));
 }
 
@@ -440,6 +439,7 @@ void NfcTag::discoverTechnologies(tNFA_ACTIVATED& activationData) {
     mTechList[mNumTechList] = TARGET_TYPE_KOVIO_BARCODE;
   } else if (NFC_PROTOCOL_MIFARE == rfDetail.protocol) {
     DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; Mifare Classic", fn);
+    //    EXTNS_MfcInit(activationData);
     mTechList[mNumTechList] =
         TARGET_TYPE_MIFARE_CLASSIC;  // is TagTechnology.MIFARE_CLASSIC
 
@@ -488,8 +488,7 @@ void NfcTag::discoverTechnologies(tNFA_ACTIVATED& activationData) {
         "%s; index=%d; tech=0x%02X; handle=%d; nfc type=0x%02X", fn, i,
         mTechList[i], mTechHandles[i], mTechLibNfcTypes[i]);
   }
-  mNfcStatsUtil->logNfcTagType(mTechLibNfcTypes[mNumTechList - 1],
-                               mTechParams[mNumTechList - 1].mode);
+
 TheEnd:
   return;
 }

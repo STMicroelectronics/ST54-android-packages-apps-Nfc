@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2013 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,6 @@
  * limitations under the License.
  */
 
-#pragma once
+package com.android.nfcstm.beam;
 
-#include <jni.h>
-
-#include "nativehelper_utils.h"
-
-class ScopedLocalFrame {
- public:
-  explicit ScopedLocalFrame(JNIEnv* env) : mEnv(env) {
-    mEnv->PushLocalFrame(128);
-  }
-
-  ~ScopedLocalFrame() { mEnv->PopLocalFrame(nullptr); }
-
- private:
-  JNIEnv* const mEnv;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedLocalFrame);
-};
+parcelable BeamTransferRecord;

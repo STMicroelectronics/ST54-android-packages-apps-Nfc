@@ -42,23 +42,24 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.content.pm.PackageManager.ResolveInfoFlags;
 import android.content.pm.ResolveInfo;
 import android.content.pm.ServiceInfo;
 import android.net.Uri;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.HostApduService;
 import android.nfc.cardemulation.OffHostApduService;
+import android.os.SystemProperties;
 import android.os.UserHandle;
 import android.os.UserManager;
-import android.sysprop.NfcProperties;
 import android.util.AtomicFile;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.Xml;
 import android.util.proto.ProtoOutputStream;
 import com.android.internal.annotations.GuardedBy;
+import com.android.internal.util.FastXmlSerializer;
 import com.android.nfcstm.NfcService;
+import com.google.android.collect.Maps;
 import com.st.android.nfc_extensions.StAidGroup;
 import com.st.android.nfc_extensions.StApduServiceInfo;
 import com.st.android.nfc_extensions.StConstants;
@@ -89,7 +90,7 @@ public class RegisteredServicesCache {
     static final String XML_INDENT_OUTPUT_FEATURE =
             "http://xmlpull.org/v1/doc/features.html#indent-output";
     static final String TAG = "HCENfc_RegisteredServicesCache";
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);
     static final String SERVICE_STATE_FILE_VERSION = "1.0";
 
     final Context mContext;
@@ -115,6 +116,8 @@ public class RegisteredServicesCache {
 
     String mLastAddedPackage = null;
 
+    ArrayList<String> mComponentList = new ArrayList<>();
+
     public interface Callback {
         /** ServicesUpdated for specific userId. */
         void onServicesUpdated(
@@ -123,7 +126,7 @@ public class RegisteredServicesCache {
 
     static class DynamicSettings {
         public final int uid;
-        public final HashMap<String, StAidGroup> aidGroups = new HashMap<>();
+        public final HashMap<String, StAidGroup> aidGroups = Maps.newHashMap();
         public String offHostSE;
 
         DynamicSettings(int uid) {
@@ -134,10 +137,10 @@ public class RegisteredServicesCache {
     private static class UserServices {
         /** All services that have registered */
         final HashMap<ComponentName, StApduServiceInfo> services =
-                new HashMap<>(); // Re-built at run-time
+                Maps.newHashMap(); // Re-built at run-time
 
         final HashMap<ComponentName, DynamicSettings> dynamicSettings =
-                new HashMap<>(); // In memory cache of dynamic settings
+                Maps.newHashMap(); // In memory cache of dynamic settings
     };
 
     private UserServices findOrCreateUserLocked(int userId) {
@@ -202,18 +205,11 @@ public class RegisteredServicesCache {
                                                             action));
                             if (!replaced) {
                                 int currentUser = ActivityManager.getCurrentUser();
-                                if (currentUser
-                                        == getProfileParentId(
-                                                UserHandle.getUserHandleForUid(uid)
-                                                        .getIdentifier())) {
+                                if (currentUser == getProfileParentId(UserHandle.getUserId(uid))) {
                                     if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
-                                        invalidateCache(
-                                                UserHandle.getUserHandleForUid(uid).getIdentifier(),
-                                                true);
+                                        invalidateCache(UserHandle.getUserId(uid), true);
                                     } else {
-                                        invalidateCache(
-                                                UserHandle.getUserHandleForUid(uid).getIdentifier(),
-                                                false);
+                                        invalidateCache(UserHandle.getUserId(uid), false);
                                     }
                                 } else {
                                     // Cache will automatically be updated on user switch
@@ -237,13 +233,13 @@ public class RegisteredServicesCache {
         intentFilter.addAction(Intent.ACTION_PACKAGE_FIRST_LAUNCH);
         intentFilter.addAction(Intent.ACTION_PACKAGE_RESTARTED);
         intentFilter.addDataScheme("package");
-        mContext.registerReceiverForAllUsers(mReceiver.get(), intentFilter, null, null);
+        mContext.registerReceiverAsUser(mReceiver.get(), UserHandle.ALL, intentFilter, null, null);
 
         // Register for events related to sdcard operations
         IntentFilter sdFilter = new IntentFilter();
         sdFilter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_AVAILABLE);
         sdFilter.addAction(Intent.ACTION_EXTERNAL_APPLICATIONS_UNAVAILABLE);
-        mContext.registerReceiverForAllUsers(mReceiver.get(), sdFilter, null, null);
+        mContext.registerReceiverAsUser(mReceiver.get(), UserHandle.ALL, sdFilter, null, null);
 
         File dataDir = mContext.getFilesDir();
         mDynamicSettingsFile = new AtomicFile(new File(dataDir, "dynamic_aids.xml"));
@@ -385,6 +381,11 @@ public class RegisteredServicesCache {
             }
         }
 
+        // Check if in component list
+        if (mComponentList.contains(pkg)) {
+            return true;
+        }
+
         return false;
     }
 
@@ -392,7 +393,7 @@ public class RegisteredServicesCache {
         PackageManager pm;
         try {
             pm =
-                    mContext.createPackageContextAsUser("android", 0, UserHandle.of(userId))
+                    mContext.createPackageContextAsUser("android", 0, new UserHandle(userId))
                             .getPackageManager();
         } catch (NameNotFoundException e) {
             Log.e(TAG, "getInstalledStServices() - Could not create user package context");
@@ -405,14 +406,14 @@ public class RegisteredServicesCache {
                 new ArrayList<>(
                         pm.queryIntentServicesAsUser(
                                 new Intent(HostApduService.SERVICE_INTERFACE),
-                                ResolveInfoFlags.of(PackageManager.GET_META_DATA),
-                                UserHandle.of(userId)));
+                                PackageManager.GET_META_DATA,
+                                userId));
 
         List<ResolveInfo> resolvedOffHostServices =
                 pm.queryIntentServicesAsUser(
                         new Intent(OffHostApduService.SERVICE_INTERFACE),
-                        ResolveInfoFlags.of(PackageManager.GET_META_DATA),
-                        UserHandle.of(userId));
+                        PackageManager.GET_META_DATA,
+                        userId);
         resolvedServices.addAll(resolvedOffHostServices);
 
         if (DBG)
@@ -434,15 +435,6 @@ public class RegisteredServicesCache {
                             "getInstalledStServices() - componentName:  "
                                     + componentName.flattenToString());
 
-                // Check if the package exported the service in manifest
-                if (!si.exported) {
-                    Log.e(
-                            TAG,
-                            "Skipping application component "
-                                    + componentName
-                                    + ": it must configured as exported");
-                    continue;
-                }
                 // Check if the package holds the NFC permission
                 if (pm.checkPermission(android.Manifest.permission.NFC, si.packageName)
                         != PackageManager.PERMISSION_GRANTED) {
@@ -554,6 +546,7 @@ public class RegisteredServicesCache {
             /** *************************** */
             /* Fill services entry */
             /** *************************** */
+            mComponentList.clear();
             for (StApduServiceInfo service : validServices) {
                 if (DBG)
                     Log.d(
@@ -573,6 +566,7 @@ public class RegisteredServicesCache {
                 }
 
                 userServices.services.put(service.getComponent(), service);
+                mComponentList.add(name.getPackageName());
             }
 
             if (mLastAddedPackage != null) {
@@ -689,8 +683,7 @@ public class RegisteredServicesCache {
                             if (currentComponent != null
                                     && currentUid >= 0
                                     && (currentGroups.size() > 0 || currentOffHostSE != null)) {
-                                final int userId =
-                                        UserHandle.getUserHandleForUid(currentUid).getIdentifier();
+                                final int userId = UserHandle.getUserId(currentUid);
                                 DynamicSettings dynSettings = new DynamicSettings(currentUid);
                                 for (StAidGroup group : currentGroups) {
                                     dynSettings.aidGroups.put(group.getCategory(), group);
@@ -736,7 +729,7 @@ public class RegisteredServicesCache {
         FileOutputStream fos = null;
         try {
             fos = mDynamicSettingsFile.startWrite();
-            XmlSerializer out = Xml.newSerializer();
+            XmlSerializer out = new FastXmlSerializer();
             out.setOutput(fos, "utf-8");
             out.startDocument(null, true);
             out.setFeature(XML_INDENT_OUTPUT_FEATURE, true);
@@ -1024,7 +1017,7 @@ public class RegisteredServicesCache {
         int state = StConstants.SERVICE_STATE_ENABLED;
         try {
             fos = mServiceStateFile.startWrite();
-            XmlSerializer out = Xml.newSerializer();
+            XmlSerializer out = new FastXmlSerializer();
             out.setOutput(fos, "utf-8");
             out.startDocument(null, true);
             out.setFeature(XML_INDENT_OUTPUT_FEATURE, true);

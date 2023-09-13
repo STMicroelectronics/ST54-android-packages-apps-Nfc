@@ -126,8 +126,14 @@ static jbyteArray StNativeNdefNfcee_doreadNdefData(JNIEnv* e, jobject o,
   ScopedByteArrayRO fileBytes(e, fileId);
   uint8_t* fileBuf =
       const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&fileBytes[0]));
+  size_t fileBufLen = fileBytes.size();
   uint32_t fileMaxLen = 0;
   uint8_t* p;
+
+  if (fileBufLen != 2) {
+    LOG(ERROR) << "FileID array length unexpected";
+    return NULL;
+  }
 
   DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
 

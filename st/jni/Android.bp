@@ -12,6 +12,7 @@ cc_library_shared {
     srcs: ["*.cpp"],
 
     shared_libs: [
+        "libandroidicu",
         "libnativehelper",
         "libcutils",
         "libutils",
@@ -20,7 +21,6 @@ cc_library_shared {
         "libchrome",
         "libbase",
         "libdl",
-        "libstatslog_nfc_st",
     ],
 
     static_libs: [	"libxml2",

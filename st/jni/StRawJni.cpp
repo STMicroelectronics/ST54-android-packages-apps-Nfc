@@ -58,9 +58,14 @@ extern int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded);
 extern void (*g_pRawJniUnload)();
 }  // namespace android
 
+static SyncEvent sExtRawLib;
+static void *mRawHandle = NULL;
+static int (*mRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
+                              size_t *) = NULL;
+
 /*******************************************************************************
 **
-** Function:        nativeNfcTag_registerNdefTypeHandler
+** Function:        rawNfaConnectionCallback
 **
 ** Description:     Register a callback to receive NDEF message from the tag
 **                  from the NFA_NDEF_DATA_EVT.
@@ -81,11 +86,16 @@ static void rawNfaConnectionCallback(uint8_t connEvent,
   sExtRawEvent.end();
 }
 
-static SyncEvent sExtRawLib;
-static void *mRawHandle = NULL;
-static int (*mRawJniSeqSplit)(int, uint8_t *, size_t, uint8_t *, size_t,
-                              size_t *) = NULL;
-
+/*******************************************************************************
+**
+** Function:        rawJniUnload
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 static void rawJniUnload() {
   sExtRawLib.start();
   mRawJniSeqSplit = NULL;
@@ -98,6 +108,16 @@ static void rawJniUnload() {
   sExtRawLib.end();
 }
 
+/*******************************************************************************
+**
+** Function:        rawJniLoad
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 static int (*rawJniLoad())(int, uint8_t *, size_t, uint8_t *, size_t,
                            size_t *) {
   sExtRawLib.start();
@@ -125,6 +145,16 @@ static int (*rawJniLoad())(int, uint8_t *, size_t, uint8_t *, size_t,
   return mRawJniSeqSplit;
 }
 
+/*******************************************************************************
+**
+** Function:        rawJniSeq
+**
+** Description:     Register a callback to receive NDEF message from the tag
+**                  from the NFA_NDEF_DATA_EVT.
+**
+** Returns:         None
+**
+*******************************************************************************/
 int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
               size_t outbaszmax, size_t *outbasz) {
   int ret = -1;
@@ -219,7 +249,7 @@ end:
 
 /*******************************************************************************
 **
-** Function:        nativeNfcTag_registerNdefTypeHandler
+** Function:        nfc_get_card_info
 **
 ** Description:     Register a callback to receive NDEF message from the tag
 **                  from the NFA_NDEF_DATA_EVT.
@@ -237,7 +267,7 @@ extern "C" void nfc_get_card_info(uint8_t atqa[2], uint8_t uid[10],
 
 /*******************************************************************************
 **
-** Function:        nativeNfcTag_registerNdefTypeHandler
+** Function:        printf_buffer
 **
 ** Description:     Register a callback to receive NDEF message from the tag
 **                  from the NFA_NDEF_DATA_EVT.
@@ -259,7 +289,7 @@ static void printf_buffer(const char *header, const uint8_t *buf,
 
 /*******************************************************************************
 **
-** Function:        nativeNfcTag_registerNdefTypeHandler
+** Function:        nfc_mode_configure
 **
 ** Description:     Register a callback to receive NDEF message from the tag
 **                  from the NFA_NDEF_DATA_EVT.
@@ -278,8 +308,8 @@ extern "C" bool nfc_mode_configure(int bRawMode) {
   PRINTF("%s; %s", __func__, bRawMode ? "true" : "false");
 
   was_started = android::isDiscoveryStarted();
-  if (was_started && was_activated) {
-    if (sExtRawEnabledMode == bRawMode) {
+  if (was_started) {
+    if ((sExtRawEnabledMode == bRawMode) && was_activated) {
       // we only need to reSelect the tag
       android::unRegisterRawRfCallback();  // so that the events go to
                                            // StNativeTag
@@ -316,7 +346,9 @@ extern "C" bool nfc_mode_configure(int bRawMode) {
 
   // Start discovery
   sExtRawEvent.start();
-  android::startRfDiscovery(true);
+  if (!android::isDiscoveryStarted()) {
+    android::startRfDiscovery(true);
+  }
 
   do {
     CONN_event_code = 255;
@@ -380,7 +412,7 @@ extern "C" bool nfc_mode_configure(int bRawMode) {
 
 /*******************************************************************************
 **
-** Function:        nativeNfcTag_registerNdefTypeHandler
+** Function:        nfc_initiator_transceive_bytes
 **
 ** Description:     Register a callback to receive NDEF message from the tag
 **                  from the NFA_NDEF_DATA_EVT.
@@ -521,7 +553,7 @@ extern "C" int nfc_initiator_transceive_bytes(void *pnd, const uint8_t *pbtTx,
 
 /*******************************************************************************
 **
-** Function:        nativeNfcTag_registerNdefTypeHandler
+** Function:        nfc_initiator_transceive_bits
 **
 ** Description:     Register a callback to receive NDEF message from the tag
 **                  from the NFA_NDEF_DATA_EVT.

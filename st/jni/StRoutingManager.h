@@ -80,11 +80,12 @@ class StRoutingManager {
   StRoutingManager(const StRoutingManager&);
   StRoutingManager& operator=(const StRoutingManager&);
 
+  void notifyEeUpdated();
+
   void handleData(uint8_t technology, const uint8_t* data, uint32_t dataLen,
                   tNFA_STATUS status);
   void notifyActivated(uint8_t technology);
   void notifyDeactivated(uint8_t technology);
-  void notifyEeUpdated();
   tNFA_TECHNOLOGY_MASK updateEeTechRouteSetting();
   void updateDefaultProtocolRoute();
   void updateDefaultRoute();
@@ -101,6 +102,9 @@ class StRoutingManager {
 
   void setVarDefaultRoutes();
   bool checkIfUiccRoute();
+
+  void triggerOnHostEmulationData(uint8_t technology);
+  static void notifyOnHostEmulationData(void* data);
 
   // Every routing table entry is matched exact (BCM20793)
   static const int AID_MATCHING_EXACT_ONLY = 0x00;
@@ -193,6 +197,10 @@ class StRoutingManager {
   uint8_t mMuteTechBitmap;
 
   uint16_t mRemainingLmrtSize;
+  struct OnHostEmulationDataData {
+    uint8_t hceDataTech;
+    std::vector<uint8_t>* rxDataBuffer;
+  };
 
   tNFA_EE_CBACK_DATA mCbEventData;
   tNFA_EE_DISCOVER_REQ mEeInfo;

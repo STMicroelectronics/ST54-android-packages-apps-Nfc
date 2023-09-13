@@ -212,7 +212,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
     } break;
 
     case (DYN_ST_T1_IN_ROTATION):
-      FALLTHROUGH;
+      U_FALLTHROUGH;
     case (DYN_ST_T1_RUNNING): {
       switch (mDynFwSubState) {
         case (DYN_SST_IDLE):
@@ -298,7 +298,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
             }
               // fallback to CERx case if there was no error status.
               // (observer mode)
-              FALLTHROUGH;
+              U_FALLTHROUGH;
             case T_CERx: {
               // if length is 0, ignore
               if (!reallen) {
@@ -747,7 +747,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          FALLTHROUGH;
+          U_FALLTHROUGH;
         case T_fieldLevel:
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
           LOG_IF(INFO, nfc_debug_enabled)
@@ -763,7 +763,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
         }
           // fallback to T_CERx case if there was no error status.
           offset++;
-          FALLTHROUGH;
+          U_FALLTHROUGH;
         case T_CERx: {
           // Check if we go to ISO-DEP or not
           switch (p_data[2] & 0xF) {
@@ -821,7 +821,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          FALLTHROUGH;
+          U_FALLTHROUGH;
         case T_fieldLevel:
           LOG_IF(INFO, nfc_debug_enabled)
               << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
@@ -837,7 +837,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
         }
           // fallback to T_CERx case if there was no error status.
           offset++;
-          FALLTHROUGH;
+          U_FALLTHROUGH;
         case T_CERx: {
           realLen = p_data[offset] << 8 | p_data[offset + 1];
           LOG_IF(INFO, nfc_debug_enabled)
@@ -895,7 +895,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          FALLTHROUGH;
+          U_FALLTHROUGH;
         case T_fieldLevel:
           LOG_IF(INFO, nfc_debug_enabled)
               << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
@@ -1736,7 +1736,7 @@ void StFwNtfManager::notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata) {
  *******************************************************************************/
 bool StFwNtfManager::needMatchSwForNfceeActionNtf() {
   // TER 22444 since FW 1.17.8643 (ST21NFCD) adds proprietary ntf with SW
-  // included.
+  // included, in that case we disable the stack mechanism to save resources.
 
   bool ter22444 = false;
 
@@ -1748,9 +1748,12 @@ bool StFwNtfManager::needMatchSwForNfceeActionNtf() {
     }
 
   } else if ((NfcStExtensions::getInstance().mHwInfo & 0xFF00) == 0x0500) {
-    // ST54J/K -- since ???
+    // ST54J/K -- since 3.10.8843
+    if ((NfcStExtensions::getInstance().mFwInfo & 0x00FF0000) >= 0x00100000) {
+      ter22444 = true;
+    }
   } else {
-    // newer chips: assumed to be by default.
+    // newer chips: always supported.
     ter22444 = true;
   }
 

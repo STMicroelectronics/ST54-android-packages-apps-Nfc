@@ -148,6 +148,7 @@ bool StSecureElement::initialize(nfc_jni_native_data* native) {
   mNfaHciHandle = NFA_HANDLE_INVALID;
 
   mNativeData = native;
+  mActualNumEe = NFA_EE_MAX_EE_SUPPORTED;
   mbNewEE = true;
   memset(mEeInfo, 0, sizeof(mEeInfo));
 
@@ -207,8 +208,10 @@ void StSecureElement::finalize() {
   mNumActivatedEe = 0;
   mIsPiping = false;
   memset(mEeInfo, 0, sizeof(mEeInfo));
+  gMutexEE.lock();
   sSecElem.mSeInfo.info[UICC_IDX].connected = false;
   sSecElem.mSeInfo.info[ESE_IDX].connected = false;
+  gMutexEE.unlock();
   sSecElem.abortWaits();
 }
 
@@ -332,12 +335,12 @@ void StSecureElement::getHostList() {
  *******************************************************************************/
 bool StSecureElement::isSEConnected(int se_id) {
   static const char fn[] = "StSecureElement::isSEConnected";
-  uint8_t i;
+  int i;
   bool status = false;
 
   gMutexSEInfo.lock();
 
-  for (i = 0; i < (sizeof(mSeInfo.info) / sizeof(mSeInfo.info[0])); i++) {
+  for (i = 0; i < (int)(sizeof(mSeInfo.info) / sizeof(mSeInfo.info[0])); i++) {
     if ((mSeInfo.info[i].id == se_id) || (mSeInfo.info[i].nfceeId == se_id)) {
       status = mSeInfo.info[i].connected;
       gMutexSEInfo.unlock();
@@ -888,6 +891,7 @@ void StSecureElement::notifyEeStatus(tNFA_HANDLE eeHandle, uint8_t status) {
   tNFA_EE_INFO* pEE = sSecElem.findEeByHandle(eeHandle);
   if (pEE == nullptr) {
     LOG(ERROR) << StringPrintf("%s;pEE is NULL", fn);
+    gMutexEE.unlock();
     return;
   }
   tNFA_EE_INFO eeInfo = *pEE;

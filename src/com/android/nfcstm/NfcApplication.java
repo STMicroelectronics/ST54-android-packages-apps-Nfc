@@ -22,6 +22,7 @@ import android.app.Application;
 import android.content.pm.PackageManager;
 import android.os.Process;
 import android.os.UserHandle;
+import android.view.ThreadedRenderer;
 import java.util.Iterator;
 import java.util.List;
 
@@ -48,7 +49,7 @@ public class NfcApplication extends Application {
         // object in those cases, hence check the name of the process
         // to determine whether we're the main NFC service, or the
         // handover process
-        ActivityManager am = this.getSystemService(ActivityManager.class);
+        ActivityManager am = (ActivityManager) this.getSystemService(ACTIVITY_SERVICE);
         List processes = am.getRunningAppProcesses();
         Iterator i = processes.iterator();
         while (i.hasNext()) {
@@ -60,6 +61,7 @@ public class NfcApplication extends Application {
         }
         if (UserHandle.myUserId() == 0 && isMainProcess) {
             mNfcService = new NfcService(this);
+            ThreadedRenderer.enableForegroundTrimming();
         }
     }
 }

@@ -16,17 +16,20 @@
 package com.android.nfcstm;
 
 import android.app.ActivityManager;
-import android.sysprop.NfcProperties;
+import android.app.IActivityManager;
+import android.app.IProcessObserver;
+import android.os.RemoteException;
+import android.os.SystemProperties;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
 import java.util.ArrayList;
 import java.util.List;
 
-public class ForegroundUtils implements ActivityManager.OnUidImportanceListener {
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+public class ForegroundUtils extends IProcessObserver.Stub {
+    static final boolean DBG = SystemProperties.getBoolean("persist.nfc.debug_enabled", false);;
     private final String TAG = "ForegroundUtils";
-    private final ActivityManager mActivityManager;
+    private final IActivityManager mIActivityManager;
 
     private final Object mLock = new Object();
     // We need to keep track of the individual PIDs per UID,
@@ -37,20 +40,17 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
     private final SparseArray<List<Callback>> mBackgroundCallbacks =
             new SparseArray<List<Callback>>();
 
-    private final SparseBooleanArray mForegroundUids = new SparseBooleanArray();
-
     private static class Singleton {
-        private static ForegroundUtils sInstance = null;
+        private static final ForegroundUtils INSTANCE = new ForegroundUtils();
     }
 
-    private ForegroundUtils(ActivityManager am) {
-        mActivityManager = am;
+    private ForegroundUtils() {
+        mIActivityManager = ActivityManager.getService();
         try {
-            mActivityManager.addOnUidImportanceListener(
-                    this, ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND);
-        } catch (Exception e) {
+            mIActivityManager.registerProcessObserver(this);
+        } catch (RemoteException e) {
             // Should not happen!
-            Log.e(TAG, "ForegroundUtils: could not register UidImportanceListener");
+            Log.e(TAG, "ForegroundUtils: could not get IActivityManager");
         }
     }
 
@@ -58,17 +58,8 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
         void onUidToBackground(int uid);
     }
 
-    /**
-     * Get an instance of the ForegroundUtils sinleton
-     *
-     * @param am The ActivityManager instance for initialization
-     * @return the instance
-     */
-    public static ForegroundUtils getInstance(ActivityManager am) {
-        if (Singleton.sInstance == null) {
-            Singleton.sInstance = new ForegroundUtils(am);
-        }
-        return Singleton.sInstance;
+    public static ForegroundUtils getInstance() {
+        return Singleton.INSTANCE;
     }
 
     /**
@@ -108,26 +99,26 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
 
     /** @return a list of UIDs currently in the foreground, or an empty list if none are found. */
     public List<Integer> getForegroundUids() {
-        ArrayList<Integer> uids = new ArrayList<Integer>(mForegroundUids.size());
+        ArrayList<Integer> uids = new ArrayList<Integer>(mForegroundUidPids.size());
         synchronized (mLock) {
-            for (int i = 0; i < mForegroundUids.size(); i++) {
-                if (mForegroundUids.valueAt(i)) {
-                    uids.add(mForegroundUids.keyAt(i));
-                }
+            for (int i = 0; i < mForegroundUidPids.size(); i++) {
+                uids.add(mForegroundUidPids.keyAt(i));
             }
         }
         return uids;
     }
 
     private boolean isInForegroundLocked(int uid) {
-        if (mForegroundUids.get(uid)) {
-            return true;
-        }
+        if (mForegroundUidPids.get(uid) != null) return true;
         if (DBG) Log.d(TAG, "Checking UID:" + Integer.toString(uid));
-        // If the onForegroundActivitiesChanged() has not yet been called,
-        // check whether the UID is in an active state to use the NFC.
-        return (mActivityManager.getUidImportance(uid)
-                == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND);
+        try {
+            // If the onForegroundActivitiesChanged() has not yet been called,
+            // check whether the UID is in an active state to use the NFC.
+            return mIActivityManager.isUidActive(uid, NfcApplication.NFC_PROCESS);
+        } catch (RemoteException e) {
+            Log.e(TAG, "ForegroundUtils: could not get isUidActive");
+        }
+        return false;
     }
 
     private void handleUidToBackground(int uid) {
@@ -149,39 +140,66 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
     }
 
     @Override
-    public void onUidImportance(int uid, int importance) {
+    public void onForegroundActivitiesChanged(int pid, int uid, boolean hasForegroundActivities)
+            throws RemoteException {
         boolean uidToBackground = false;
         synchronized (mLock) {
-            if (importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_GONE) {
-                mForegroundUids.delete(uid);
-                mBackgroundCallbacks.remove(uid);
-                if (DBG) Log.d(TAG, "UID: " + Integer.toString(uid) + " deleted.");
-                return;
-            }
-            if (importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
-                mForegroundUids.put(uid, true);
+            SparseBooleanArray foregroundPids =
+                    mForegroundUidPids.get(uid, new SparseBooleanArray());
+            if (hasForegroundActivities) {
+                foregroundPids.put(pid, true);
             } else {
-                if (mForegroundUids.get(uid)) {
-                    uidToBackground = true;
-                    mForegroundUids.put(uid, false);
-                }
+                foregroundPids.delete(pid);
+            }
+            if (foregroundPids.size() == 0) {
+                mForegroundUidPids.remove(uid);
+                uidToBackground = true;
+            } else {
+                mForegroundUidPids.put(uid, foregroundPids);
             }
         }
         if (uidToBackground) {
             handleUidToBackground(uid);
         }
         if (DBG) {
-            Log.d(TAG, "Foreground UID status:");
+            if (DBG)
+                Log.d(
+                        TAG,
+                        "Foreground changed, PID: "
+                                + Integer.toString(pid)
+                                + " UID: "
+                                + Integer.toString(uid)
+                                + " foreground: "
+                                + hasForegroundActivities);
             synchronized (mLock) {
-                for (int j = 0; j < mForegroundUids.size(); j++) {
-                    Log.d(
-                            TAG,
-                            "UID: "
-                                    + Integer.toString(mForegroundUids.keyAt(j))
-                                    + " is in foreground: "
-                                    + Boolean.toString(mForegroundUids.valueAt(j)));
+                Log.d(TAG, "Foreground UID/PID combinations:");
+                for (int i = 0; i < mForegroundUidPids.size(); i++) {
+                    int foregroundUid = mForegroundUidPids.keyAt(i);
+                    SparseBooleanArray foregroundPids = mForegroundUidPids.get(foregroundUid);
+                    if (foregroundPids.size() == 0) {
+                        Log.e(TAG, "No PIDS associated with foreground UID!");
+                    }
+                    for (int j = 0; j < foregroundPids.size(); j++)
+                        Log.d(
+                                TAG,
+                                "UID: "
+                                        + Integer.toString(foregroundUid)
+                                        + " PID: "
+                                        + Integer.toString(foregroundPids.keyAt(j)));
                 }
             }
         }
+    }
+
+    @Override
+    public void onForegroundServicesChanged(int pid, int uid, int fgServiceTypes) {}
+
+    @Override
+    public void onProcessDied(int pid, int uid) throws RemoteException {
+        if (DBG)
+            Log.d(
+                    TAG,
+                    "Process died; UID " + Integer.toString(uid) + " PID " + Integer.toString(pid));
+        onForegroundActivitiesChanged(pid, uid, false);
     }
 }

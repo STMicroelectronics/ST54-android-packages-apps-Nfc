@@ -110,7 +110,6 @@ class RoutingManager {
   uint8_t mDefaultSysCodePowerstate;
   uint8_t mOffHostAidRoutingPowerState;
   uint8_t mHostListenTechMask;
-  uint8_t mOffHostListenTechMask;
   bool mDeinitializing;
   bool mEeInfoChanged;
   bool mReceivedEeInfo;
