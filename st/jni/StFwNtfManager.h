@@ -181,13 +181,14 @@ class StFwNtfManager {
                       bool last);
   void handlePollingLoopData(uint8_t format, uint16_t data_len, uint8_t* p_data,
                              bool last);
-  int fwTsDiffToMs(uint32_t fwtsstart, uint32_t fwtsend);
-  int fwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend);
+  int fwTsDiffToMs(uint8_t format, uint32_t fwtsstart, uint32_t fwtsend);
+  int fwTsDiffToUs(uint8_t format, uint32_t fwtsstart, uint32_t fwtsend);
   void matchSendTriggerPayload(uint8_t nfcee, uint8_t* buf, int len);
   void matchGotLogPartialAid(uint8_t* aidBeg, int aidBegLen, uint8_t* aidEnd,
                              int aidEndLen, int fullLen);
   void matchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2);
   void matchPurgeActionAid(int num, bool skipLast);
-  void rplAddOneEventLocked(char type, uint8_t gain, uint32_t ts);
+  void rplAddOneEventLocked(uint8_t format, char type, uint8_t gain,
+                            uint32_t ts);
   void matchStoreActionAid(uint8_t nfcee, uint8_t* aid, int len);
 };

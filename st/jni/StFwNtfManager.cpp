@@ -165,15 +165,21 @@ StFwNtfManager& StFwNtfManager::getInstance() {
  ** Returns:         void
  **
  *******************************************************************************/
-int StFwNtfManager::fwTsDiffToMs(uint32_t fwtsstart, uint32_t fwtsend) {
+int StFwNtfManager::fwTsDiffToMs(uint8_t format, uint32_t fwtsstart,
+                                 uint32_t fwtsend) {
   uint32_t diff;
+  float factor = 128 / 28000;  // ST21NFCD, ST54J/K: 4.57us
   if (fwtsstart <= fwtsend) {
     diff = fwtsend - fwtsstart;
   } else {
     // overflow
     diff = (0xFFFFFFFF - fwtsstart) + fwtsend;
   }
-  return (int)((float)diff * 0.00457);
+  if ((format & 0x30) == 0x30) {
+    // ST54L: 3.84us
+    factor = 256 / 66666;
+  }
+  return (int)((float)diff * factor);
 }
 
 /*******************************************************************************
@@ -237,8 +243,8 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
                 if ((format & 0x30) == 0x10) {
                   // ST21NFCD
                   fw_cur_set = (int)(p_data[2] - 2);
-                } else if ((format & 0x30) == 0x20) {
-                  // ST54J
+                } else {
+                  // ST54J, ST54L
                   fw_cur_set = (int)p_data[2];
                 }
                 if (fw_cur_set !=
@@ -277,14 +283,14 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
             case T_CERxError: {
               uint8_t errstatus = p_data[4];  // ST21
 
-              if ((format & 0x30) == 0x20) {
-                // ST54J
+              if ((format & 0x30) == 0x10) {
+                // ST21NFCD
+                reallen = (p_data[5] << 8) | p_data[6];
+              } else {
+                // ST54J, ST54L
                 errstatus = p_data[5];
                 if ((p_data[2] & 0xF) != 1)  // ignore length for short frames
                   reallen = (p_data[6] << 8) | p_data[7];
-              } else {
-                // ST21NFCD
-                reallen = (p_data[5] << 8) | p_data[6];
               }
               if (errstatus != 0x00) {
                 // this was an actual error, ignore it
@@ -302,13 +308,17 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
             case T_CERx: {
               // if length is 0, ignore
               if (!reallen) {
-                if ((format & 0x30) == 0x20) {
+                if ((format & 0x30) == 0x10) {
+                  // ST21NFCD
+                  reallen = (p_data[4] << 8) | p_data[5];
+                } else if ((format & 0x30) == 0x20) {
                   // ST54J
                   if ((p_data[2] & 0xF) != 1)  // ignore length for short frames
                     reallen = (p_data[5] << 8) | p_data[6];
-                } else {
-                  // ST21NFCD
-                  reallen = (p_data[4] << 8) | p_data[5];
+                } else if ((format & 0x30) == 0x30) {
+                  // ST54L
+                  if ((p_data[2] & 0xF) != 1)  // ignore length for short frames
+                    reallen = (p_data[3] << 8) | p_data[4];
                 }
                 if (reallen == 0x00) {
                   // Ignore this, probably a short frame and we missed a
@@ -343,7 +353,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
 
   // T1 management
   if (last && (mDynFwTsT1Started != 0)) {
-    if (fwTsDiffToMs(mDynFwTsT1Started, receivedFwts) >
+    if (fwTsDiffToMs(format, mDynFwTsT1Started, receivedFwts) >
         NfcStExtensions::getInstance().mDynT1Threshold) {
       // T1 elapsed
       LOG_IF(INFO, nfc_debug_enabled) << fn << "; T1 elapsed";
@@ -380,8 +390,8 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
 
   // T2 management
   if (mDynFwTsT2Started != 0) {
-    if (last &&
-        (fwTsDiffToMs(mDynFwTsT2Started, receivedFwts) > mDynT2Threshold)) {
+    if (last && (fwTsDiffToMs(format, mDynFwTsT2Started, receivedFwts) >
+                 mDynT2Threshold)) {
       // T2 elapsed
       LOG_IF(INFO, nfc_debug_enabled) << fn << "; T2 elapsed";
       mDynFwState = DYN_ST_INITIAL;
@@ -713,7 +723,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
   uint8_t t = p_data[0];
   uint8_t l = p_data[1];
   uint32_t receivedFwts = 0;
-  int offset = ((format & 0x30) == 0x20) ? 5 : 4;  // ST54J / ST21D
+  int offset = ((format & 0x30) == 0x10) ? 4 : 5;  // ST21D : 54J/L
   if (l != data_len - 2) {
     LOG_IF(INFO, nfc_debug_enabled) << fn << "; Sizes mismatch";
     return;
@@ -941,7 +951,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
   }
 
   if (last && (mMatchSelectLastFieldOffTs != 0) &&
-      fwTsDiffToMs(mMatchSelectLastFieldOffTs, receivedFwts) > 50) {
+      fwTsDiffToMs(format, mMatchSelectLastFieldOffTs, receivedFwts) > 50) {
     // More than 50ms in field off state, we discard any previous state.
     matchPurgeActionAid(MATCH_SEL_QUEUE_LEN, false);
     mMatchSelectPartialCurrent = 0;
@@ -1193,8 +1203,8 @@ void StFwNtfManager::send1stRxAndRfParam(uint8_t format, uint16_t data_len,
     if ((format & 0x30) == 0x10) {
       // ST21NFCD
       fw_cur_set = (p_data[2] - 2);
-    } else if ((format & 0x30) == 0x20) {
-      // ST54J
+    } else {
+      // ST54J / 54L
       fw_cur_set = p_data[2];
     }
     if ((mSend1stRxFlags & SEND_1ST_RX_SENTPARAM) == 0) {
@@ -1215,7 +1225,7 @@ void StFwNtfManager::send1stRxAndRfParam(uint8_t format, uint16_t data_len,
       ((t == T_CERxError) || (t == T_CERx))) {
     if ((p_data[2] & 0xF) != 0x09) return;  // it is not a POLL type F
 
-    int offset = ((format & 0x30) == 0x20) ? 5 : 4;  // ST54J / ST21D
+    int offset = ((format & 0x30) == 0x10) ? 4 : 5;  // ST21D : 54J/L
     if (l - offset < 5) return;                      // too short for a POLL
 
     if (t == T_CERxError) {
@@ -1800,6 +1810,7 @@ void StFwNtfManager::pollingLoopSpyManagerEnable(bool enable) {
       mRPLStringIndex = 0;
       mRPLNbEvents = 0;
       mRPLLastEventTs = 0;
+      mRPLState = RPL_ST_OBSERVER;
 
       int ret = pthread_create(&mRPLThread, NULL,
                                (THREADFUNCPTR)&StFwNtfManager::rplWorker,
@@ -2057,14 +2068,14 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
           type = 'F';
           break;
       }
-      if ((format & 0x30) == 0x20) {
-        // ST54J
-        gain = (p_data[3] & 0xF0) >> 4;
-        errstatus = p_data[5];
-      } else {
+      if ((format & 0x30) == 0x10) {
         // ST21
         gain = p_data[3];
         errstatus = p_data[4];
+      } else {
+        // ST54J / 54L
+        gain = (p_data[3] & 0xF0) >> 4;
+        errstatus = p_data[5];
       }
       break;
     case T_CERx:
@@ -2079,20 +2090,20 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
           type = 'F';
           break;
       }
-      if ((format & 0x30) == 0x20) {
-        // ST54J
-        gain = (p_data[3] & 0xF0) >> 4;
-        errstatus = 0;
-      } else {
+      if ((format & 0x30) == 0x10) {
         // ST21
         gain = p_data[3];
+        errstatus = 0;
+      } else {
+        // ST54J / 54L
+        gain = (p_data[3] & 0xF0) >> 4;
         errstatus = 0;
       }
       break;
   }
 
   if (type != '?') {
-    rplAddOneEventLocked(type, gain, receivedFwts);
+    rplAddOneEventLocked(format, type, gain, receivedFwts);
   }
 
   mRPLSync.end();
@@ -2111,15 +2122,21 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
  ** Returns:         void
  **
  *******************************************************************************/
-int StFwNtfManager::fwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend) {
+int StFwNtfManager::fwTsDiffToUs(uint8_t format, uint32_t fwtsstart,
+                                 uint32_t fwtsend) {
   uint32_t diff;
+  float factor = 128 / 28;  // ST21NFCD, ST54J/K: 4.57us
   if (fwtsstart <= fwtsend) {
     diff = fwtsend - fwtsstart;
   } else {
     // overflow
     diff = (0xFFFFFFFF - fwtsstart) + fwtsend;
   }
-  return (int)((float)diff * 4.57);
+  if ((format & 0x30) == 0x30) {
+    // ST54L: 3.84us
+    factor = 256 / 66.666;
+  }
+  return (int)((float)diff * factor);
 }
 
 /*******************************************************************************
@@ -2131,8 +2148,8 @@ int StFwNtfManager::fwTsDiffToUs(uint32_t fwtsstart, uint32_t fwtsend) {
  ** Returns:         void
  **
  *******************************************************************************/
-void StFwNtfManager::rplAddOneEventLocked(char type, uint8_t gain,
-                                          uint32_t ts) {
+void StFwNtfManager::rplAddOneEventLocked(uint8_t format, char type,
+                                          uint8_t gain, uint32_t ts) {
   int added = 0;
 
   if ((mRPLNbEvents >= RPL_MAX_EVENTS) || (mRPLString == NULL)) return;
@@ -2153,7 +2170,7 @@ void StFwNtfManager::rplAddOneEventLocked(char type, uint8_t gain,
   // Add ";ts"
   added =
       snprintf(mRPLString + mRPLStringIndex, RPL_STR_MAXLEN - mRPLStringIndex,
-               ";%d", fwTsDiffToUs(mRPLLastEventTs, ts));
+               ";%d", fwTsDiffToUs(format, mRPLLastEventTs, ts));
   if (added < 0) {
     LOG(ERROR) << StringPrintf("%s; %d: failed to write (i:%d)", __func__,
                                __LINE__, mRPLStringIndex);

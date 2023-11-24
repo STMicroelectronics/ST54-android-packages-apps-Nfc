@@ -1768,6 +1768,9 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                 mHandler.removeMessages(MSG_DELAY_POLLING);
                 mPollingDisableDeathRecipients.clear();
                 mReaderModeParams = null;
+
+                // Remove any lingering MSG_START_POLLING
+                mHandler.removeMessages(MSG_START_POLLING);
             }
             mNfcDispatcher.setForegroundDispatch(null, null, null);
 

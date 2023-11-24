@@ -221,8 +221,8 @@ void NfcStExtensions::initialize(nfc_jni_native_data* native) {
 
   nfaStat = NFA_HciRegister(const_cast<char*>(APP_NAME), nfaHciCallback, TRUE);
   if (nfaStat != NFA_STATUS_OK) {
-    LOG(ERROR) << StringPrintf("%s; fail hci register; error=0x%X", fn,
-                               nfaStat);
+    LOG(ERROR) << StringPrintf(
+        "%s; fail hci register; error=0x%X (check ALLOW_LIST?)", fn, nfaStat);
     return;
   }
   mNfaHciRegisterEvent.wait();
