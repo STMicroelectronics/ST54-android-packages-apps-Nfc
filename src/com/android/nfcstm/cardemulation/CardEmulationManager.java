@@ -13,25 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/**
- * ****************************************************************************
- *
- * <p>The original Work has been changed by ST Microelectronics S.A.
- *
- * <p>Copyright (C) 2017 ST Microelectronics S.A.
- *
- * <p>Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * <p>http://www.apache.org/licenses/LICENSE-2.0
- *
- * <p>Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * <p>****************************************************************************
- */
 package com.android.nfcstm.cardemulation;
 
 import android.app.ActivityManager;
@@ -40,15 +21,20 @@ import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
+import android.nfc.Constants;
 import android.nfc.INfcCardEmulation;
 import android.nfc.INfcFCardEmulation;
 import android.nfc.NfcAdapter;
+import android.nfc.NfcManager;
 import android.nfc.cardemulation.AidGroup;
 import android.nfc.cardemulation.ApduServiceInfo;
 import android.nfc.cardemulation.CardEmulation;
 import android.nfc.cardemulation.NfcFServiceInfo;
 import android.os.Binder;
+import android.os.Bundle;
+import android.os.Looper;
 import android.os.PowerManager;
+import android.os.Process;
 import android.os.RemoteException;
 import android.os.SystemClock;
 import android.os.UserHandle;
@@ -57,17 +43,14 @@ import android.provider.Settings;
 import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
+import com.android.nfcstm.ForegroundUtils;
 import com.android.nfcstm.NfcPermissions;
 import com.android.nfcstm.NfcService;
-import com.st.android.nfc_extensions.StAidGroup;
-import com.st.android.nfc_extensions.StApduServiceInfo;
+import com.android.nfcstm.R;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * CardEmulationManager is the central entity responsible for delegating to individual components
@@ -84,7 +67,7 @@ public class CardEmulationManager
                 RegisteredNfcFServicesCache.Callback,
                 PreferredServices.Callback,
                 EnabledNfcFServices.Callback {
-    static final String TAG = "HCENfc_CardEmulationManager";
+    static final String TAG = "CardEmulationManager";
     static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
 
     static final int NFC_HCE_APDU = 0x01;
@@ -118,15 +101,23 @@ public class CardEmulationManager
     final PowerManager mPowerManager;
     boolean mNotSkipAid;
 
-    public CardEmulationManager(Context context, AidRoutingManager aidRoutingManager) {
-        if (DBG) Log.d(TAG, "constructor");
+    final ForegroundUtils mForegroundUtils;
+    private int mForegroundUid;
+
+    RoutingOptionManager mRoutingOptionManager;
+    final byte[] mOffHostRouteUicc;
+    final byte[] mOffHostRouteEse;
+
+    public CardEmulationManager(Context context) {
         mContext = context;
         mCardEmulationInterface = new CardEmulationInterface();
         mNfcFCardEmulationInterface = new NfcFCardEmulationInterface();
-        mAidCache = new RegisteredAidCache(context, aidRoutingManager);
-
+        mForegroundUtils =
+                ForegroundUtils.getInstance(context.getSystemService(ActivityManager.class));
+        mAidCache = new RegisteredAidCache(context);
         mT3tIdentifiersCache = new RegisteredT3tIdentifiersCache(context);
-        mHostEmulationManager = new HostEmulationManager(context, mAidCache);
+        mHostEmulationManager =
+                new HostEmulationManager(context, Looper.getMainLooper(), mAidCache);
         mHostNfcFEmulationManager = new HostNfcFEmulationManager(context, mT3tIdentifiersCache);
         mServiceCache = new RegisteredServicesCache(context, this);
         mNfcFServicesCache = new RegisteredNfcFServicesCache(context, this);
@@ -136,15 +127,11 @@ public class CardEmulationManager
         mServiceCache.initialize();
         mNfcFServicesCache.initialize();
         mPowerManager = context.getSystemService(PowerManager.class);
-    }
+        mRoutingOptionManager = RoutingOptionManager.getInstance();
+        mOffHostRouteEse = mRoutingOptionManager.getOffHostRouteEse();
+        mOffHostRouteUicc = mRoutingOptionManager.getOffHostRouteUicc();
 
-    public void overflowNotificationClosed(boolean canceled) {
-        mPreferredServices.overflowNotificationClosed(canceled);
-    }
-
-    // To get Object of RegisteredAidCache to get the Default Offhost service.
-    public RegisteredAidCache getRegisteredAidCache() {
-        return mAidCache;
+        mForegroundUid = Process.INVALID_UID;
     }
 
     public INfcCardEmulation getNfcCardEmulationInterface() {
@@ -153,6 +140,10 @@ public class CardEmulationManager
 
     public INfcFCardEmulation getNfcFCardEmulationInterface() {
         return mNfcFCardEmulationInterface;
+    }
+
+    public void onPollingLoopDetected(Bundle pollingFrame) {
+        mHostEmulationManager.onPollingLoopDetected(pollingFrame);
     }
 
     public void onHostCardEmulationActivated(int technology) {
@@ -165,12 +156,10 @@ public class CardEmulationManager
                     PowerManager.USER_ACTIVITY_FLAG_INDIRECT);
         }
         if (technology == NFC_HCE_APDU) {
-            if (DBG) Log.d(TAG, "onHostCardEmulationActivated() - HCE activation");
             mHostEmulationManager.onHostEmulationActivated();
             mPreferredServices.onHostEmulationActivated();
             mNotSkipAid = false;
         } else if (technology == NFC_HCE_NFCF) {
-            if (DBG) Log.d(TAG, "onHostCardEmulationActivated() - HCE-F activation");
             mHostNfcFEmulationManager.onHostEmulationActivated();
             mNfcFServicesCache.onHostEmulationActivated();
             mEnabledNfcFServices.onHostEmulationActivated();
@@ -179,10 +168,8 @@ public class CardEmulationManager
 
     public void onHostCardEmulationData(int technology, byte[] data) {
         if (technology == NFC_HCE_APDU) {
-            if (DBG) Log.d(TAG, "onHostCardEmulationData() - HCE data");
             mHostEmulationManager.onHostEmulationData(data);
         } else if (technology == NFC_HCE_NFCF) {
-            if (DBG) Log.d(TAG, "onHostCardEmulationData() - HCE-F data");
             mHostNfcFEmulationManager.onHostEmulationData(data);
         }
         // Don't trigger userActivity if it's selecting NDEF AID
@@ -195,11 +182,9 @@ public class CardEmulationManager
 
     public void onHostCardEmulationDeactivated(int technology) {
         if (technology == NFC_HCE_APDU) {
-            if (DBG) Log.d(TAG, "onHostCardEmulationDeactivated() - HCE deactivated");
             mHostEmulationManager.onHostEmulationDeactivated();
             mPreferredServices.onHostEmulationDeactivated();
         } else if (technology == NFC_HCE_NFCF) {
-            if (DBG) Log.d(TAG, "onHostCardEmulationDeactivated() - HCE-F deactivated");
             mHostNfcFEmulationManager.onHostEmulationDeactivated();
             mNfcFServicesCache.onHostEmulationDeactivated();
             mEnabledNfcFServices.onHostEmulationDeactivated();
@@ -211,7 +196,6 @@ public class CardEmulationManager
     }
 
     public void onUserSwitched(int userId) {
-        if (DBG) Log.d(TAG, "onUserSwitched()");
         // for HCE
         mServiceCache.onUserSwitched();
         mPreferredServices.onUserSwitched(userId);
@@ -230,7 +214,6 @@ public class CardEmulationManager
     }
 
     public void onNfcEnabled() {
-        if (DBG) Log.d(TAG, "onNfcEnabled()");
         // for HCE
         mAidCache.onNfcEnabled();
         // for HCE-F
@@ -238,7 +221,6 @@ public class CardEmulationManager
     }
 
     public void onNfcDisabled() {
-        if (DBG) Log.d(TAG, "onNfcDisabled()");
         // for HCE
         mAidCache.onNfcDisabled();
         // for HCE-F
@@ -249,7 +231,6 @@ public class CardEmulationManager
     }
 
     public void onSecureNfcToggled() {
-        if (DBG) Log.d(TAG, "onSecureNfcToggled()");
         mAidCache.onSecureNfcToggled();
         mT3tIdentifiersCache.onSecureNfcToggled();
     }
@@ -309,9 +290,8 @@ public class CardEmulationManager
 
     @Override
     public void onServicesUpdated(
-            int userId, List<StApduServiceInfo> services, boolean validateInstalled) {
-        if (DBG) Log.d(TAG, "onServicesUpdated()");
-        // Verify defaults are still sane
+            int userId, List<ApduServiceInfo> services, boolean validateInstalled) {
+        // Verify defaults are still the same
         verifyDefaults(userId, services, validateInstalled);
         // Update the AID cache
         mAidCache.onServicesUpdated(userId, services);
@@ -329,7 +309,7 @@ public class CardEmulationManager
         mEnabledNfcFServices.onServicesUpdated();
     }
 
-    void verifyDefaults(int userId, List<StApduServiceInfo> services, boolean validateInstalled) {
+    void verifyDefaults(int userId, List<ApduServiceInfo> services, boolean validateInstalled) {
         UserManager um =
                 mContext.createContextAsUser(UserHandle.of(userId), /*flags=*/ 0)
                         .getSystemService(UserManager.class);
@@ -345,13 +325,7 @@ public class CardEmulationManager
                             uh.getIdentifier(),
                             CardEmulation.CATEGORY_PAYMENT,
                             validateInstalled && (uh.getIdentifier() == userId));
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "verifyDefaults() - default payment: "
-                                + paymentService
-                                + " for user:"
-                                + uh);
+            if (DBG) Log.d(TAG, "default: " + paymentService + " for user:" + uh);
             if (paymentService != null) {
                 numDefaultPaymentServices++;
                 defaultPaymentService = paymentService;
@@ -359,17 +333,21 @@ public class CardEmulationManager
             }
         }
         if (numDefaultPaymentServices > 1) {
-            Log.e(TAG, "verifyDefaults() - Current default is not aligned across multiple users");
+            Log.e(TAG, "Current default is not aligned across multiple users");
             // leave default unset
             for (UserHandle uh : luh) {
                 setDefaultServiceForCategoryChecked(
                         uh.getIdentifier(), null, CardEmulation.CATEGORY_PAYMENT);
             }
         } else {
-            //            if (DBG) {
-            //                Log.d(TAG, "Current default: " + defaultPaymentService + " for user:"
-            //                        + userIdDefaultPaymentService);
-            //            }
+            if (DBG) {
+                Log.d(
+                        TAG,
+                        "Current default: "
+                                + defaultPaymentService
+                                + " for user:"
+                                + userIdDefaultPaymentService);
+            }
         }
         if (defaultPaymentService == null) {
             // A payment service may have been removed, leaving only one;
@@ -380,14 +358,14 @@ public class CardEmulationManager
             try {
                 pm =
                         mContext.createPackageContextAsUser(
-                                        "android", /*flags=*/ 0, new UserHandle(userId))
+                                        "android", /*flags=*/ 0, UserHandle.of(userId))
                                 .getPackageManager();
             } catch (NameNotFoundException e) {
                 Log.e(TAG, "Could not create user package context");
                 return;
             }
 
-            for (StApduServiceInfo service : services) {
+            for (ApduServiceInfo service : services) {
                 if (service.hasCategory(CardEmulation.CATEGORY_PAYMENT)
                         && wasServicePreInstalled(pm, service.getComponent())) {
                     numPaymentServices++;
@@ -396,19 +374,16 @@ public class CardEmulationManager
             }
             if (numPaymentServices > 1) {
                 // More than one service left, leave default unset
-                if (DBG)
-                    Log.d(TAG, "verifyDefaults() - No default set, more than one service left.");
+                if (DBG) Log.d(TAG, "No default set, more than one service left.");
                 setDefaultServiceForCategoryChecked(userId, null, CardEmulation.CATEGORY_PAYMENT);
             } else if (numPaymentServices == 1) {
                 // Make single found payment service the default
-                if (DBG)
-                    Log.d(TAG, "verifyDefaults() - No default set, making single service default.");
+                if (DBG) Log.d(TAG, "No default set, making single service default.");
                 setDefaultServiceForCategoryChecked(
                         userId, lastFoundPaymentService, CardEmulation.CATEGORY_PAYMENT);
             } else {
                 // No payment services left, leave default at null
-                if (DBG)
-                    Log.d(TAG, "verifyDefaults() - No default set, last payment service removed.");
+                if (DBG) Log.d(TAG, "No default set, last payment service removed.");
                 setDefaultServiceForCategoryChecked(userId, null, CardEmulation.CATEGORY_PAYMENT);
             }
         }
@@ -440,10 +415,8 @@ public class CardEmulationManager
         String name =
                 Settings.Secure.getString(
                         mContext.createContextAsUser(UserHandle.of(userId), 0).getContentResolver(),
-                        Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT);
+                        Constants.SETTINGS_SECURE_NFC_PAYMENT_DEFAULT_COMPONENT);
         if (name != null) {
-            if (DBG) Log.d(TAG, "getDefaultServiceForCategory() - name: " + name);
-
             ComponentName service = ComponentName.unflattenFromString(name);
             if (!validateInstalled || service == null) {
                 return service;
@@ -457,26 +430,8 @@ public class CardEmulationManager
 
     boolean setDefaultServiceForCategoryChecked(
             int userId, ComponentName service, String category) {
-
-        if ((DBG) && (service != null))
-            Log.d(
-                    TAG,
-                    "setDefaultServiceForCategoryChecked() - service: "
-                            + service.flattenToString()
-                            + ", category: "
-                            + category);
-        else if (DBG)
-            Log.d(
-                    TAG,
-                    "setDefaultServiceForCategoryChecked() - service: null"
-                            + ", category: "
-                            + category);
-
         if (!CardEmulation.CATEGORY_PAYMENT.equals(category)) {
-            Log.e(
-                    TAG,
-                    "setDefaultServiceForCategoryChecked() - Not allowing defaults for category "
-                            + category);
+            Log.e(TAG, "Not allowing defaults for category " + category);
             return false;
         }
         // TODO Not really nice to be writing to Settings.Secure here...
@@ -485,13 +440,10 @@ public class CardEmulationManager
         if (service == null || mServiceCache.hasService(userId, service)) {
             Settings.Secure.putString(
                     mContext.createContextAsUser(UserHandle.of(userId), 0).getContentResolver(),
-                    Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT,
+                    Constants.SETTINGS_SECURE_NFC_PAYMENT_DEFAULT_COMPONENT,
                     service != null ? service.flattenToString() : null);
         } else {
-            Log.e(
-                    TAG,
-                    "setDefaultServiceForCategoryChecked - Could not find default service to make default: "
-                            + service);
+            Log.e(TAG, "Could not find default service to make default: " + service);
         }
         return true;
     }
@@ -504,10 +456,7 @@ public class CardEmulationManager
             // broadcasts are delayed by 10 seconds in that scenario, which causes
             // calls to our APIs referencing that service to fail.
             // Hence, update the cache in case we don't know about the service.
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "isServiceRegistered() - Didn't find passed in service, invalidating cache.");
+            if (DBG) Log.d(TAG, "Didn't find passed in service, invalidating cache.");
             mServiceCache.invalidateCache(userId, true);
         }
         return mServiceCache.hasService(userId, service);
@@ -521,10 +470,7 @@ public class CardEmulationManager
             // broadcasts are delayed by 10 seconds in that scenario, which causes
             // calls to our APIs referencing that service to fail.
             // Hence, update the cache in case we don't know about the service.
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "isNfcFServiceInstalled() - Didn't find passed in service, invalidating cache.");
+            if (DBG) Log.d(TAG, "Didn't find passed in service, invalidating cache.");
             mNfcFServicesCache.invalidateCache(userId);
         }
         return mNfcFServicesCache.hasService(userId, service);
@@ -586,21 +532,6 @@ public class CardEmulationManager
         @Override
         public boolean isDefaultServiceForCategory(
                 int userId, ComponentName service, String category) {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - isDefaultServiceForCategory() - service: "
-                                + service.flattenToString()
-                                + ", category: "
-                                + category);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - isDefaultServiceForCategory() - service: "
-                                + "null"
-                                + ", category: "
-                                + category);
-
             NfcPermissions.enforceUserPermissions(mContext);
             NfcPermissions.validateUserId(userId);
             if (!isServiceRegistered(userId, service)) {
@@ -613,21 +544,6 @@ public class CardEmulationManager
         @Override
         public boolean isDefaultServiceForAid(int userId, ComponentName service, String aid)
                 throws RemoteException {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - isDefaultServiceForAid() - service: "
-                                + service.flattenToString()
-                                + ", aid: "
-                                + aid);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - isDefaultServiceForAid() - service: "
-                                + "null"
-                                + ", aid: "
-                                + aid);
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
@@ -639,21 +555,6 @@ public class CardEmulationManager
         @Override
         public boolean setDefaultServiceForCategory(
                 int userId, ComponentName service, String category) throws RemoteException {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - setDefaultServiceForCategory() - service: "
-                                + service.flattenToString()
-                                + ", category: "
-                                + category);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - setDefaultServiceForCategory() - service: "
-                                + "null"
-                                + ", category: "
-                                + category);
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceAdminPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
@@ -665,14 +566,6 @@ public class CardEmulationManager
         @Override
         public boolean setDefaultForNextTap(int userId, ComponentName service)
                 throws RemoteException {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - setDefaultForNextTap() - service: "
-                                + service.flattenToString());
-            else if (DBG)
-                Log.d(TAG, "CardEmulationInterface - setDefaultForNextTap() - service: " + "null");
-
             NfcPermissions.validateProfileId(mContext, userId);
             NfcPermissions.enforceAdminPermissions(mContext);
             if (service != null && !isServiceRegistered(userId, service)) {
@@ -682,28 +575,23 @@ public class CardEmulationManager
         }
 
         @Override
+        public boolean setShouldDefaultToObserveModeForService(
+                int userId, ComponentName service, boolean enable) {
+            /// EMPTY
+            return false;
+            
+        }
+
+        @Override
         public boolean registerAidGroupForService(
                 int userId, ComponentName service, AidGroup aidGroup) throws RemoteException {
-            if (DBG) {
-                String s = null;
-                String a = null;
-                if (service != null) s = service.flattenToString();
-                if (aidGroup != null) a = aidGroup.toString();
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - registerAidGroupForService() - service: "
-                                + s
-                                + ", aidGroup: "
-                                + a);
-            }
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
                 return false;
             }
             if (!mServiceCache.registerAidGroupForService(
-                    userId, Binder.getCallingUid(), service, new StAidGroup(aidGroup, null))) {
+                    userId, Binder.getCallingUid(), service, aidGroup)) {
                 return false;
             }
             NfcService.getInstance()
@@ -711,23 +599,9 @@ public class CardEmulationManager
             return true;
         }
 
+
         @Override
         public boolean setOffHostForService(int userId, ComponentName service, String offHostSE) {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - setOffHostForService() - service: "
-                                + service.flattenToString()
-                                + ", offHostSE: "
-                                + offHostSE);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - setOffHostForService() - service: "
-                                + "null"
-                                + ", offHostSE: "
-                                + offHostSE);
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
@@ -744,22 +618,12 @@ public class CardEmulationManager
 
         @Override
         public boolean unsetOffHostForService(int userId, ComponentName service) {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - unsetOffHostForService() - service: "
-                                + service.flattenToString());
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - unsetOffHostForService() - service: " + "null");
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
                 return false;
             }
-            if (!mServiceCache.unsetOffHostSecureElement(userId, Binder.getCallingUid(), service)) {
+            if (!mServiceCache.resetOffHostSecureElement(userId, Binder.getCallingUid(), service)) {
                 return false;
             }
             NfcService.getInstance()
@@ -770,50 +634,18 @@ public class CardEmulationManager
         @Override
         public AidGroup getAidGroupForService(int userId, ComponentName service, String category)
                 throws RemoteException {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - getAidGroupForService() - service: "
-                                + service.flattenToString()
-                                + ", category: "
-                                + category);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - getAidGroupForService() - service: "
-                                + "null"
-                                + ", category: "
-                                + category);
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
                 return null;
             }
-            StAidGroup stGroup =
-                    mServiceCache.getAidGroupForService(
-                            userId, Binder.getCallingUid(), service, category);
-            return (stGroup == null) ? null : stGroup.getAidGroup();
+            return mServiceCache.getAidGroupForService(
+                    userId, Binder.getCallingUid(), service, category);
         }
 
         @Override
         public boolean removeAidGroupForService(int userId, ComponentName service, String category)
                 throws RemoteException {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - removeAidGroupForService() - service: "
-                                + service.flattenToString()
-                                + ", category: "
-                                + category);
-            else if (DBG)
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - removeAidGroupForService() - service: "
-                                + "null"
-                                + ", category: "
-                                + category);
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(userId, service)) {
@@ -833,28 +665,11 @@ public class CardEmulationManager
                 throws RemoteException {
             NfcPermissions.validateProfileId(mContext, userId);
             NfcPermissions.enforceAdminPermissions(mContext);
-            List<StApduServiceInfo> stApduServices =
-                    mServiceCache.getStServicesForCategory(userId, category);
-            ArrayList<ApduServiceInfo> apduServices = new ArrayList<ApduServiceInfo>();
-            for (StApduServiceInfo stApdu : stApduServices) {
-                ApduServiceInfo apduService = stApdu.createApduServiceInfo();
-                apduServices.add(apduService);
-            }
-            if (DBG)
-                Log.d(TAG, "CardEmulationInterface - getServices() size: " + apduServices.size());
-            return apduServices;
+            return mServiceCache.getServicesForCategory(userId, category);
         }
 
         @Override
         public boolean setPreferredService(ComponentName service) throws RemoteException {
-            if (DBG && (service != null))
-                Log.d(
-                        TAG,
-                        "CardEmulationInterface - setPreferredService() - service: "
-                                + service.flattenToString());
-            else if (DBG)
-                Log.d(TAG, "CardEmulationInterface - setPreferredService() - service: " + "null");
-
             NfcPermissions.enforceUserPermissions(mContext);
             if (!isServiceRegistered(
                     UserHandle.getUserHandleForUid(Binder.getCallingUid()).getIdentifier(),
@@ -868,8 +683,6 @@ public class CardEmulationManager
 
         @Override
         public boolean unsetPreferredService() throws RemoteException {
-            if (DBG) Log.d(TAG, "CardEmulationInterface - unsetPreferredService()");
-
             NfcPermissions.enforceUserPermissions(mContext);
             return mPreferredServices.unregisteredPreferredForegroundService(
                     Binder.getCallingUid());
@@ -882,14 +695,20 @@ public class CardEmulationManager
 
         @Override
         public ApduServiceInfo getPreferredPaymentService(int userId) throws RemoteException {
-            if (DBG) Log.d(TAG, "CardEmulationInterface - getPreferredPaymentService()");
-
             NfcPermissions.validateUserId(userId);
             NfcPermissions.enforceUserPermissions(mContext);
             NfcPermissions.enforcePreferredPaymentInfoPermissions(mContext);
-            StApduServiceInfo stService =
-                    mServiceCache.getStService(userId, mAidCache.getPreferredService());
-            return (stService != null) ? stService.createApduServiceInfo() : null;
+            return mServiceCache.getService(userId, mAidCache.getPreferredService());
+        }
+
+        @Override
+        public boolean setServiceEnabledForCategoryOther(
+                int userId, ComponentName app, boolean status) throws RemoteException {
+            if (!mContext.getResources().getBoolean(R.bool.enable_service_for_category_other))
+                return false;
+            NfcPermissions.enforceUserPermissions(mContext);
+
+            return mServiceCache.registerOtherForService(userId, app, status);
         }
 
         @Override
@@ -897,14 +716,109 @@ public class CardEmulationManager
             String defaultComponent =
                     Settings.Secure.getString(
                             mContext.getContentResolver(),
-                            Settings.Secure.NFC_PAYMENT_DEFAULT_COMPONENT);
+                            Constants.SETTINGS_SECURE_NFC_PAYMENT_DEFAULT_COMPONENT);
+            return defaultComponent != null ? true : false;
+        }
+
+        @Override
+        public boolean overrideRoutingTable(int userHandle, String protocol, String technology) {
+            Log.d(
+                    TAG,
+                    "overrideRoutingTable. userHandle "
+                            + userHandle
+                            + ", protocol "
+                            + protocol
+                            + ", technology "
+                            + technology);
+
+            int callingUid = Binder.getCallingUid();
+            if (!mForegroundUtils.registerUidToBackgroundCallback(
+                    mForegroundCallback, callingUid)) {
+                Log.e(TAG, "overrideRoutingTable: Caller is not in foreground.");
+                return false;
+            }
+            mForegroundUid = callingUid;
+
+            int protocolRoute = getRouteForSecureElement(protocol);
+            int technologyRoute = getRouteForSecureElement(technology);
             if (DBG)
                 Log.d(
                         TAG,
-                        "CardEmulationInterface - isDefaultPaymentRegistered() - "
-                                + (defaultComponent != null ? true : false));
-            return defaultComponent != null ? true : false;
+                        "protocolRoute " + protocolRoute + ", technologyRoute " + technologyRoute);
+
+            //            mRoutingOptionManager.overrideDefaultRoute(protocolRoute);
+            mRoutingOptionManager.overrideDefaultIsoDepRoute(protocolRoute);
+            mRoutingOptionManager.overrideDefaultOffHostRoute(technologyRoute);
+            mAidCache.onRoutingOverridedOrRecovered();
+            //            NfcService.getInstance().commitRouting();
+
+            return true;
         }
+
+        @Override
+        public boolean recoverRoutingTable(int userHandle) {
+            Log.d(TAG, "recoverRoutingTable. userHandle " + userHandle);
+
+            if (!mForegroundUtils.isInForeground(Binder.getCallingUid())) {
+                if (DBG) Log.d(TAG, "recoverRoutingTable : not in foreground.");
+                return false;
+            }
+            mForegroundUid = Process.INVALID_UID;
+
+            mRoutingOptionManager.recoverOverridedRoutingTable();
+            mAidCache.onRoutingOverridedOrRecovered();
+            //            NfcService.getInstance().commitRouting();
+
+            return true;
+        }
+    }
+
+    final ForegroundUtils.Callback mForegroundCallback = new ForegroundCallbackImpl();
+
+    class ForegroundCallbackImpl implements ForegroundUtils.Callback {
+        @Override
+        public void onUidToBackground(int uid) {
+            synchronized (CardEmulationManager.this) {
+                if (mForegroundUid == uid) {
+                    if (DBG) Log.d(TAG, "Uid " + uid + " switch to background.");
+                    mForegroundUid = Process.INVALID_UID;
+                    mRoutingOptionManager.recoverOverridedRoutingTable();
+                }
+            }
+        }
+    }
+
+    private int getRouteForSecureElement(String se) {
+        String route = se;
+        if (route == null) {
+            return -1;
+        }
+
+        if (route.equals("DH")) {
+            return 0;
+        }
+
+        if (route.length() == 3) {
+            route = route + '1';
+        }
+
+        try {
+            if (route.startsWith("eSE") && mOffHostRouteEse != null) {
+                int index = Integer.parseInt(route.substring(3));
+                if (mOffHostRouteEse.length >= index && index > 0) {
+                    return mOffHostRouteEse[index - 1] & 0xFF;
+                }
+            } else if (route.startsWith("SIM") && mOffHostRouteUicc != null) {
+                int index = Integer.parseInt(route.substring(3));
+                if (mOffHostRouteUicc.length >= index && index > 0) {
+                    return mOffHostRouteUicc[index - 1] & 0xFF;
+                }
+            }
+            if (mOffHostRouteEse == null && mOffHostRouteUicc == null) return -1;
+        } catch (NumberFormatException ignored) {
+        }
+
+        return 0;
     }
 
     /**
@@ -1006,10 +920,7 @@ public class CardEmulationManager
 
     @Override
     public void onPreferredPaymentServiceChanged(int userId, ComponentName service) {
-        if (DBG) Log.d(TAG, "onPreferredPaymentServiceChanged()");
-
         mAidCache.onPreferredPaymentServiceChanged(userId, service);
-
         mHostEmulationManager.onPreferredPaymentServiceChanged(userId, service);
 
         NfcService.getInstance().onPreferredPaymentChanged(NfcAdapter.PREFERRED_PAYMENT_CHANGED);
@@ -1017,90 +928,29 @@ public class CardEmulationManager
 
     @Override
     public void onPreferredForegroundServiceChanged(int userId, ComponentName service) {
-        if (DBG) Log.d(TAG, "onPreferredForegroundServiceChanged()");
-
         mAidCache.onPreferredForegroundServiceChanged(userId, service);
         mHostEmulationManager.onPreferredForegroundServiceChanged(userId, service);
 
         NfcService.getInstance().onPreferredPaymentChanged(NfcAdapter.PREFERRED_PAYMENT_CHANGED);
-    }
-
-    public void onUserSettingsChanged() {
-
-        if (DBG) Log.d(TAG, "onRoutingTableChanged()");
-
-        mAidCache.clearRoutingTable();
-        mAidCache.onRoutingTableChanged();
-    }
-
-    public void onRoutingTableChanged() {
-
-        if (DBG) Log.d(TAG, "onRoutingTableChanged()");
-
-        mAidCache.onRoutingTableChanged();
-        mT3tIdentifiersCache.onRoutingTableChanged();
-    }
-
-    public Map<String, Integer> getServicesAidCacheSize(int userId, String category) {
-
-        if (DBG) Log.d(TAG, "getServicesAidCacheSize()");
-
-        if (category == CardEmulation.CATEGORY_PAYMENT) {
-            return null;
-        }
-        List<StApduServiceInfo> nonPaymentServices = new ArrayList<StApduServiceInfo>();
-        Map<String, Integer> nonPaymentServiceAidCacheSize = new HashMap<String, Integer>();
-        Integer serviceAidCacheSize = 0x00;
-        String serviceComponent = null;
-        NfcPermissions.validateUserId(userId);
-        NfcPermissions.enforceUserPermissions(mContext);
-        nonPaymentServices =
-                mServiceCache.getStServicesForCategory(userId, CardEmulation.CATEGORY_OTHER);
-        for (StApduServiceInfo serviceinfo : nonPaymentServices) {
-            serviceAidCacheSize = 0x00;
-            serviceComponent = null;
-            if (serviceinfo != null) {
-                for (String aid : serviceinfo.getAids()) {
-                    if (aid.endsWith("*") || aid.endsWith("#")) {
-                        serviceAidCacheSize += aid.length() - 0x01;
-                    } else {
-                        serviceAidCacheSize += aid.length();
-                    }
-                }
-                serviceComponent = serviceinfo.getComponent().flattenToString();
-                nonPaymentServiceAidCacheSize.put(serviceComponent, serviceAidCacheSize);
+        long token = Binder.clearCallingIdentity();
+        try {
+            if (!android.nfc.Flags.nfcObserveMode()) {
+                return;
             }
+        } finally {
+            Binder.restoreCallingIdentity(token);
         }
 
-        if (DBG)
-            Log.d(
-                    TAG,
-                    "getServicesAidCacheSize() - nonPaymentServiceAidCacheSize: "
-                            + nonPaymentServiceAidCacheSize);
-
-        // Add dynamic non-payment services
-        return nonPaymentServiceAidCacheSize;
-    }
-
-    public List<StApduServiceInfo> getAllServices() {
-        int userId = ActivityManager.getCurrentUser();
-        return mServiceCache.getStServices(userId);
-    }
-
-    public int updateServiceState(int userId, Map<String, Boolean> serviceState) {
-
-        if (DBG) Log.d(TAG, "updateServiceState() ");
-
-        NfcPermissions.validateUserId(userId);
-        NfcPermissions.enforceUserPermissions(mContext);
-        return mServiceCache.updateServiceState(userId, Binder.getCallingUid(), serviceState);
-    }
-
-    public void updateStatusOfServices(boolean commitStatus) {
-
-        if (DBG) Log.d(TAG, "updateStatusOfServices() ");
-
-        mServiceCache.updateStatusOfServices(commitStatus);
+        ComponentName paymentService =
+                getDefaultServiceForCategory(userId, CardEmulation.CATEGORY_PAYMENT, false);
+        NfcManager manager = mContext.getSystemService(NfcManager.class);
+        NfcAdapter adapter = manager.getDefaultAdapter();
+        if (mServiceCache.doesServiceDefaultToObserveMode(
+                userId, service != null ? service : paymentService)) {
+            adapter.disallowTransaction();
+        } else {
+            adapter.allowTransaction();
+        }
     }
 
     @Override
@@ -1117,13 +967,7 @@ public class CardEmulationManager
         return "";
     }
 
-    public List<StApduServiceInfo> getStServices(int userId, String category)
-            throws RemoteException {
-
-        if (DBG) Log.d(TAG, "getStServices()");
-
-        NfcPermissions.validateUserId(userId);
-        NfcPermissions.enforceAdminPermissions(mContext);
-        return mServiceCache.getStServicesForCategory(userId, category);
+    public boolean isRequiresScreenOnServiceExist() {
+        return mAidCache.isRequiresScreenOnServiceExist();
     }
 }

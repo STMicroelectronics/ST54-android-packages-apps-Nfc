@@ -19,13 +19,13 @@
  */
 
 #include "CondVar.h"
-#include "NfcJniUtil.h"
 
+#include <android-base/logging.h>
+#include <android-base/stringprintf.h>
 #include <errno.h>
 #include <string.h>
 
-#include <android-base/stringprintf.h>
-#include <base/logging.h>
+#include "NfcJniUtil.h"
 
 using android::base::StringPrintf;
 
@@ -44,7 +44,6 @@ CondVar::CondVar() {
   pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
   memset(&mCondition, 0, sizeof(mCondition));
   int const res = pthread_cond_init(&mCondition, &attr);
-  pthread_condattr_destroy(&attr);
   if (res) {
     LOG(ERROR) << StringPrintf("CondVar::CondVar: fail init; error=0x%X", res);
   }

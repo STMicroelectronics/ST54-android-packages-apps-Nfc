@@ -16,16 +16,14 @@
 
 #include "NfcStatsUtil.h"
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <log/log.h>
 #include <statslog_nfc_st.h>
 
 #include "nfc_api.h"
 
 using android::base::StringPrintf;
-
-extern bool nfc_debug_enabled;
 
 /*******************************************************************************
 **
@@ -41,8 +39,8 @@ extern bool nfc_debug_enabled;
 *******************************************************************************/
 void NfcStatsUtil::logNfcTagType(int protocol, int discoveryMode) {
   static const char fn[] = "NfcStatsUtil::logNfcTagType";
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s: protocol %d, mode %d", fn, protocol, discoveryMode);
+  LOG(DEBUG) << StringPrintf("%s: protocol %d, mode %d", fn, protocol,
+                             discoveryMode);
   int tagType = nfc::stats::NFC_TAG_TYPE_OCCURRED__TYPE__TAG_UNKNOWN;
   if (protocol == NFC_PROTOCOL_T1T) {
     tagType = nfc::stats::NFC_TAG_TYPE_OCCURRED__TYPE__TAG_TYPE_1;
@@ -54,9 +52,7 @@ void NfcStatsUtil::logNfcTagType(int protocol, int discoveryMode) {
     tagType = nfc::stats::NFC_TAG_TYPE_OCCURRED__TYPE__TAG_MIFARE_CLASSIC;
   } else if (protocol == NFC_PROTOCOL_ISO_DEP) {
     if ((discoveryMode == NFC_DISCOVERY_TYPE_POLL_A) ||
-        (discoveryMode == NFC_DISCOVERY_TYPE_POLL_A_ACTIVE) ||
-        (discoveryMode == NFC_DISCOVERY_TYPE_LISTEN_A) ||
-        (discoveryMode == NFC_DISCOVERY_TYPE_LISTEN_A_ACTIVE)) {
+        (discoveryMode == NFC_DISCOVERY_TYPE_LISTEN_A)) {
       tagType = nfc::stats::NFC_TAG_TYPE_OCCURRED__TYPE__TAG_TYPE_4A;
     } else if ((discoveryMode == NFC_DISCOVERY_TYPE_POLL_B) ||
                (discoveryMode == NFC_DISCOVERY_TYPE_POLL_B_PRIME) ||
@@ -85,7 +81,7 @@ void NfcStatsUtil::logNfcTagType(int protocol, int discoveryMode) {
 *******************************************************************************/
 void NfcStatsUtil::writeNfcStatsTagTypeOccurred(int tagType) {
   static const char fn[] = "NfcStatsUtil::writeNfcStatsTagTypeOccurred";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s: %d", fn, tagType);
+  LOG(DEBUG) << StringPrintf("%s: %d", fn, tagType);
 
   nfc::stats::stats_write(nfc::stats::NFC_TAG_TYPE_OCCURRED, tagType);
 }

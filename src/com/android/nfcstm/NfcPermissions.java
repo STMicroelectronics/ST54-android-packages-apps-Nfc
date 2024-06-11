@@ -61,10 +61,6 @@ public class NfcPermissions {
         context.enforceCallingOrSelfPermission(ADMIN_PERM, ADMIN_PERM_ERROR);
     }
 
-    public static void enforceAdminPermissionsClient(Context context) {
-        context.enforceCallingPermission(ADMIN_PERM, ADMIN_PERM_ERROR);
-    }
-
     public static void enforceUserPermissions(Context context) {
         context.enforceCallingOrSelfPermission(NFC_PERMISSION, NFC_PERM_ERROR);
     }

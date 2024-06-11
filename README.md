@@ -1,4 +1,4 @@
 # ST54-android-packages-apps-Nfc
 NFC service
 
-Tag : 140-20231112-23W45p1
+Tag : 150MASTER-20240605-RC

@@ -57,7 +57,6 @@
     <uses-permission android:name="android.permission.OVERRIDE_WIFI_CONFIG" />
     <uses-permission android:name="android.permission.DEVICE_POWER" />
     <uses-permission android:name="android.permission.ACCESS_VR_STATE"/>
-    <uses-permission android:name="android.permission.RESTRICTED_VR_ACCESS"/>
     <uses-permission android:name="android.permission.USER_ACTIVITY" />
     <uses-permission android:name="android.permission.BIND_RESOLVER_RANKER_SERVICE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -78,8 +77,9 @@
                  android:usesCleartextTraffic="false"
                  android:supportsRtl="true"
                  android:hardwareAccelerated="false"
-                 android:requestLegacyExternalStorage="true"
                  android:memtagMode="async"
+                 android:directBootAware="true"
+                 android:defaultToDeviceProtectedStorage="true"
     >
         <meta-data android:name="com.google.android.backup.api_key"
             android:value="AEdPqrEAAAAIbiKKs0wlimxeJ9y8iRIaBOH6aeb2IurmZyBHvg" />
@@ -140,19 +140,7 @@
             </intent-filter>
         </receiver>
 
-        <receiver android:name="com.android.nfcstm.st.NfcSimStateObserver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.SIM_STATE_CHANGED" />
-            </intent-filter>
-        </receiver>
-
-        <receiver
-            android:exported="false"
-            android:name="com.android.nfcstm.NfcService$NotificationBroadcastReceiver" />
-
         <service android:name=".handover.PeripheralHandoverService"
         />
-        <uses-library android:name="com.st.android.nfc_extensions" android:required="true" />
     </application>
 </manifest>

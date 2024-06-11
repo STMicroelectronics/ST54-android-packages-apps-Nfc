@@ -26,6 +26,7 @@ import android.os.UserHandle;
 import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
+import androidx.annotation.VisibleForTesting;
 import com.android.nfcstm.ForegroundUtils;
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
@@ -75,9 +76,7 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
         boolean changed = false;
         synchronized (mLock) {
             if (mActivated) {
-                Log.d(
-                        TAG,
-                        "computeEnabledForegroundService() - configuration will be postponed until deactivation");
+                Log.d(TAG, "configuration will be postponed until deactivation");
                 mComputeFgRequested = true;
                 return;
             }
@@ -106,9 +105,7 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
         boolean changed = false;
         synchronized (mLock) {
             if (mForegroundComponent != null) {
-                Log.d(
-                        TAG,
-                        "onServicesUpdated() - Removing foreground enabled service because of service update.");
+                Log.d(TAG, "Removing foreground enabled service because of service update.");
                 mForegroundRequested = null;
                 mForegroundUid = -1;
                 changed = true;
@@ -135,9 +132,7 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
                 }
             }
             if (service.equals(mForegroundRequested) && mForegroundUid == callingUid) {
-                Log.e(
-                        TAG,
-                        "registerEnabledForegroundService() - The servcie is already requested to the foreground service.");
+                Log.e(TAG, "The servcie is already requested to the foreground service.");
                 return true;
             }
             if (mForegroundUtils.registerUidToBackgroundCallback(this, callingUid)) {
@@ -145,9 +140,7 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
                 mForegroundUid = callingUid;
                 success = true;
             } else {
-                Log.e(
-                        TAG,
-                        "registerEnabledForegroundService() - Calling UID is not in the foreground, ignorning!");
+                Log.e(TAG, "Calling UID is not in the foreground, ignorning!");
             }
         }
         if (success) {
@@ -178,9 +171,7 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
         if (mForegroundUtils.isInForeground(callingUid)) {
             return unregisterForegroundService(callingUid);
         } else {
-            Log.e(
-                    TAG,
-                    "unregisterEnabledForegroundService() - Calling UID is not in the foreground, ignorning!");
+            Log.e(TAG, "Calling UID is not in the foreground, ignorning!");
             return false;
         }
     }
@@ -208,7 +199,7 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
             }
         }
         if (needComputeFg) {
-            Log.d(TAG, "onHostEmulationDeactivated() - do postponed configuration");
+            Log.d(TAG, "do postponed configuration");
             computeEnabledForegroundService();
         }
     }
@@ -257,5 +248,20 @@ public class EnabledNfcFServices implements com.android.nfcstm.ForegroundUtils.C
             proto.write(EnabledNfcFServicesProto.COMPUTE_FG_REQUESTED, mComputeFgRequested);
             proto.write(EnabledNfcFServicesProto.FOREGROUND_UID, mForegroundUid);
         }
+    }
+
+    @VisibleForTesting
+    public boolean isActivated() {
+        return mActivated;
+    }
+
+    @VisibleForTesting
+    public boolean isNfcDisabled() {
+        return !mActivated && mForegroundUid == -1;
+    }
+
+    @VisibleForTesting
+    public boolean isUserSwitched() {
+        return !mActivated && mForegroundUid == -1 && !mComputeFgRequested;
     }
 }

@@ -83,15 +83,17 @@ public final class Utils {
         for (int i = 0; i < intentFilter.countDataTypes(); i++) {
             proto.write(IntentFilterProto.DATA_TYPES, intentFilter.getDataType(i));
         }
+        /*
         for (int i = 0; i < intentFilter.countMimeGroups(); i++) {
             proto.write(IntentFilterProto.MIME_GROUPS, intentFilter.getMimeGroup(i));
-        }
+        }*/
+
         if (intentFilter.getPriority() != 0
         /* || TODO(b/271463752): Get this info - hasPartialTypes() */ ) {
             proto.write(IntentFilterProto.PRIORITY, intentFilter.getPriority());
             proto.write(IntentFilterProto.HAS_PARTIAL_TYPES, false /* hasPartialTypes() */);
         }
-        proto.write(IntentFilterProto.GET_AUTO_VERIFY, intentFilter.getAutoVerify());
+        proto.write(IntentFilterProto.GET_AUTO_VERIFY, false /* intentFilter.getAutoVerify() */);
         proto.end(token);
     }
 
@@ -142,5 +144,19 @@ public final class Utils {
         // the target info.
         proto.write(PendingIntentProto.TARGET, pendingIntent.toString());
         proto.end(token);
+    }
+
+    public static String maskSubstring(String original, int start) {
+        if (original == null) {
+            return "";
+        }
+        if (original.length() <= start) {
+            return original;
+        }
+        StringBuilder masked = new StringBuilder(original);
+        for (int i = start; i < original.length(); i++) {
+            masked.setCharAt(i, '*');
+        }
+        return masked.toString();
     }
 }

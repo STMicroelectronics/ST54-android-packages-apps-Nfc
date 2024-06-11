@@ -20,6 +20,7 @@ import android.app.ActivityManager;
 import android.app.ActivityManager.RunningAppProcessInfo;
 import android.app.Application;
 import android.content.pm.PackageManager;
+import android.nfc.Constants;
 import android.os.Process;
 import android.os.UserHandle;
 import java.util.Iterator;
@@ -38,7 +39,7 @@ public class NfcApplication extends Application {
     public void onCreate() {
         super.onCreate();
         PackageManager pm = getApplicationContext().getPackageManager();
-        if (!pm.hasSystemFeature(PackageManager.FEATURE_NFC_ANY)) {
+        if (!pm.hasSystemFeature(Constants.FEATURE_NFC_ANY)) {
             return;
         }
 

@@ -19,12 +19,14 @@ package com.android.nfcstm.cardemulation;
 import android.content.ComponentName;
 import android.content.Context;
 import android.nfc.cardemulation.NfcFServiceInfo;
+import android.os.ParcelFileDescriptor;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
 import java.io.FileDescriptor;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -93,13 +95,10 @@ public class RegisteredT3tIdentifiersCache {
 
     public NfcFServiceInfo resolveNfcid2(String nfcid2) {
         synchronized (mLock) {
-            if (DBG) Log.d(TAG, "resolveNfcid2() - resolving NFCID " + nfcid2);
+            if (DBG) Log.d(TAG, "resolveNfcid2: resolving NFCID " + nfcid2);
             NfcFServiceInfo resolveInfo;
             resolveInfo = mForegroundT3tIdentifiersCache.get(nfcid2);
-            Log.d(
-                    TAG,
-                    "resolveNfcid2() - Resolved to: "
-                            + (resolveInfo == null ? "null" : resolveInfo.toString()));
+            Log.d(TAG, "Resolved to: " + (resolveInfo == null ? "null" : resolveInfo.toString()));
             return resolveInfo;
         }
     }
@@ -135,7 +134,7 @@ public class RegisteredT3tIdentifiersCache {
         if (DBG) {
             Log.d(
                     TAG,
-                    "generateForegroundT3tIdentifiersCacheLocked() - mForegroundT3tIdentifiersCache: size="
+                    "mForegroundT3tIdentifiersCache: size="
                             + mForegroundT3tIdentifiersCache.size());
             for (Map.Entry<String, NfcFServiceInfo> entry :
                     mForegroundT3tIdentifiersCache.entrySet()) {
@@ -151,7 +150,7 @@ public class RegisteredT3tIdentifiersCache {
     void updateRoutingLocked(boolean force) {
         if (DBG) Log.d(TAG, "updateRoutingLocked");
         if (!mNfcEnabled) {
-            Log.d(TAG, "updateRoutingLocked() - Not updating routing table because NFC is off.");
+            Log.d(TAG, "Not updating routing table because NFC is off.");
             return;
         }
 
@@ -182,12 +181,6 @@ public class RegisteredT3tIdentifiersCache {
         }
     }
 
-    public void onRoutingTableChanged() {
-        synchronized (mLock) {
-            updateRoutingLocked(true);
-        }
-    }
-
     public void onServicesUpdated(int userId, List<NfcFServiceInfo> services) {
         if (DBG) Log.d(TAG, "onServicesUpdated");
         synchronized (mLock) {
@@ -197,7 +190,7 @@ public class RegisteredT3tIdentifiersCache {
 
     /** Enabled Foreground NfcF service changed */
     public void onEnabledForegroundNfcFServiceChanged(int userId, ComponentName component) {
-        if (DBG) Log.d(TAG, "onEnabledForegroundNfcFServiceChanged()");
+        if (DBG) Log.d(TAG, "Enabled foreground service changed.");
         synchronized (mLock) {
             if (component != null) {
                 if (mEnabledForegroundService != null
@@ -244,14 +237,22 @@ public class RegisteredT3tIdentifiersCache {
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
         pw.println("T3T Identifier cache entries: ");
-        for (Map.Entry<String, NfcFServiceInfo> entry : mForegroundT3tIdentifiersCache.entrySet()) {
-            pw.println("    NFCID2: " + entry.getKey());
-            pw.println("    NfcFServiceInfo: ");
-            entry.getValue().dump(fd, pw, args);
+        ParcelFileDescriptor pFd;
+        try {
+            pFd = ParcelFileDescriptor.dup(fd);
+            for (Map.Entry<String, NfcFServiceInfo> entry :
+                    mForegroundT3tIdentifiersCache.entrySet()) {
+                pw.println("    NFCID2: " + entry.getKey());
+                pw.println("    NfcFServiceInfo: ");
+                entry.getValue().dump(pFd, pw, args);
+            }
+            pw.println("");
+            mRoutingManager.dump(fd, pw, args);
+            pw.println("");
+            pFd.close();
+        } catch (IOException e) {
+            pw.println("Failed to dump T3T idenitifier cache entries: " + e);
         }
-        pw.println("");
-        mRoutingManager.dump(fd, pw, args);
-        pw.println("");
     }
 
     /**

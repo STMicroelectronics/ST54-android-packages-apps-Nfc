@@ -13,51 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/**
- * ****************************************************************************
- *
- * <p>The original Work has been changed by NXP Semiconductors.
- *
- * <p>Copyright (C) 2015 NXP Semiconductors
- *
- * <p>Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * <p>http://www.apache.org/licenses/LICENSE-2.0
- *
- * <p>Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * <p>****************************************************************************
- */
-/**
- * ****************************************************************************
- *
- * <p>The original Work has been changed by ST Microelectronics S.A.
- *
- * <p>Copyright (C) 2017 ST Microelectronics S.A.
- *
- * <p>Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * <p>http://www.apache.org/licenses/LICENSE-2.0
- *
- * <p>Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * <p>****************************************************************************
- */
+
 package com.android.nfcstm;
 
 import android.annotation.Nullable;
 import android.nfc.NdefMessage;
 import android.os.Bundle;
 import java.io.FileDescriptor;
-import java.io.IOException;
 
 public interface DeviceHost {
     public interface DeviceHostListener {
@@ -70,14 +32,6 @@ public interface DeviceHost {
 
         public void onHostCardEmulationDeactivated(int technology);
 
-        /** Notifies P2P Device detected, to activate LLCP link */
-        public void onLlcpLinkActivated(NfcDepEndpoint device);
-
-        /** Notifies P2P Device detected, to activate LLCP link */
-        public void onLlcpLinkDeactivated(NfcDepEndpoint device);
-
-        public void onLlcpFirstPacketReceived(NfcDepEndpoint device);
-
         public void onRemoteFieldActivated();
 
         public void onRemoteFieldDeactivated();
@@ -88,25 +42,9 @@ public interface DeviceHost {
 
         public void onHwErrorReported();
 
-        public void onDefaultRoutesSet(
-                int aidRoute,
-                int mifareRoute,
-                int isoDepRoute,
-                int felicaRoute,
-                int abTechRoute,
-                int scRoute);
+        public void onPollingLoopDetected(Bundle pollingFrame);
 
-        public void onDetectionFOD(int FodReason);
-
-        public void onStLogData(int logtype, byte[][] data);
-
-        public void onActionNtfReceived(int nfcee, byte[] data);
-
-        public void onRawAuthReceived(boolean status);
-
-        public void onIntfActivatedNtfReceived(byte[] data);
-
-        public void onPollingLoopData(String data);
+        public void onVendorSpecificEvent(int gid, int oid, byte[] payload);
     }
 
     public interface TagEndpoint {
@@ -118,14 +56,12 @@ public interface DeviceHost {
 
         boolean presenceCheck();
 
-        boolean enableLptdPresenceCheck(boolean enable);
-
         boolean isPresent();
 
         void startPresenceChecking(
                 int presenceCheckDelay, @Nullable TagDisconnectedCallback callback);
 
-        void stopPresenceChecking(boolean isShutdown);
+        void stopPresenceChecking();
 
         int[] getTechList();
 
@@ -147,8 +83,6 @@ public interface DeviceHost {
 
         NdefMessage findAndReadNdef();
 
-        NdefMessage ReadNdef();
-
         boolean formatNdef(byte[] key);
 
         boolean isNdefFormatable();
@@ -157,7 +91,6 @@ public interface DeviceHost {
 
         int getConnectedTechnology();
 
-        void endPreviousPresenceCheck();
         /**
          * Find Ndef only As per NFC forum test specification ndef write test expects only ndef
          * detection followed by ndef write. System property nfc.dta.skipNdefRead added to skip
@@ -167,7 +100,7 @@ public interface DeviceHost {
     }
 
     public interface TagDisconnectedCallback {
-        void onTagDisconnected(long handle);
+        void onTagDisconnected();
     }
 
     public interface NfceeEndpoint {
@@ -175,11 +108,6 @@ public interface DeviceHost {
     }
 
     public interface NfcDepEndpoint {
-
-        /** Peer-to-Peer Target */
-        public static final short MODE_P2P_TARGET = 0x00;
-        /** Peer-to-Peer Initiator */
-        public static final short MODE_P2P_INITIATOR = 0x01;
         /** Invalid target mode */
         public static final short MODE_INVALID = 0xff;
 
@@ -198,48 +126,6 @@ public interface DeviceHost {
         public int getMode();
 
         public byte[] getGeneralBytes();
-
-        public byte getLlcpVersion();
-    }
-
-    public interface LlcpSocket {
-        public void connectToSap(int sap) throws IOException;
-
-        public void connectToService(String serviceName) throws IOException;
-
-        public void close() throws IOException;
-
-        public void send(byte[] data) throws IOException;
-
-        public int receive(byte[] recvBuff) throws IOException;
-
-        public int getRemoteMiu();
-
-        public int getRemoteRw();
-
-        public int getLocalSap();
-
-        public int getLocalMiu();
-
-        public int getLocalRw();
-    }
-
-    public interface LlcpServerSocket {
-        public LlcpSocket accept() throws IOException, LlcpException;
-
-        public void close() throws IOException;
-    }
-
-    public interface LlcpConnectionlessSocket {
-        public int getLinkMiu();
-
-        public int getSap();
-
-        public void send(int sap, byte[] data) throws IOException;
-
-        public LlcpPacket receive() throws IOException;
-
-        public void close() throws IOException;
     }
 
     /**
@@ -269,8 +155,6 @@ public interface DeviceHost {
 
     public boolean unrouteAid(byte[] aid);
 
-    public boolean clearAidTable();
-
     public boolean commitRouting();
 
     public void registerT3tIdentifier(byte[] t3tIdentifier);
@@ -280,19 +164,6 @@ public interface DeviceHost {
     public void clearT3tIdentifiersCache();
 
     public int getLfT3tMax();
-
-    public LlcpConnectionlessSocket createLlcpConnectionlessSocket(int nSap, String sn)
-            throws LlcpException;
-
-    public LlcpServerSocket createLlcpServerSocket(
-            int nSap, String sn, int miu, int rw, int linearBufferLength) throws LlcpException;
-
-    public LlcpSocket createLlcpSocket(int sap, int miu, int rw, int linearBufferLength)
-            throws LlcpException;
-
-    public boolean doCheckLlcp();
-
-    public boolean doActivateLlcp();
 
     public void resetTimeouts();
 
@@ -308,21 +179,9 @@ public interface DeviceHost {
 
     public int getAidTableSize();
 
-    void setP2pInitiatorModes(int modes);
-
-    void setP2pTargetModes(int modes);
-
     boolean getExtendedLengthApdusSupported();
 
-    int getDefaultLlcpMiu();
-
-    int getDefaultLlcpRwSize();
-
     void dump(FileDescriptor fd);
-
-    boolean enableScreenOffSuspend();
-
-    boolean disableScreenOffSuspend();
 
     public void doSetScreenState(int screen_state_mask);
 
@@ -338,7 +197,9 @@ public interface DeviceHost {
 
     public boolean setNfcSecure(boolean enable);
 
-    public String getNfaStorageDir();
+    public boolean isObserveModeSupported();
+
+    public boolean setObserveMode(boolean enable);
 
     /** Get the committed listen mode routing configuration */
     byte[] getRoutingTable();
@@ -351,4 +212,20 @@ public interface DeviceHost {
 
     /** Set NFCC power state by sending NFCEE_POWER_AND_LINK_CNTRL_CMD */
     void setNfceePowerAndLinkCtrl(boolean enable);
+
+    /** Enable or Disable the Power Saving Mode based on flag */
+    boolean setPowerSavingMode(boolean flag);
+
+    void setIsoDepProtocolRoute(int route);
+
+    void setTechnologyABRoute(int route);
+
+    void clearRoutingEntry(int clearFlags);
+
+    /** Set NFCC discovery technology for polling and listening */
+    void setDiscoveryTech(int pollTech, int listenTech);
+
+    void resetDiscoveryTech();
+    /** Sends Vendor NCI command */
+    NfcVendorNciResponse sendRawVendorCmd(int mt, int gid, int oid, byte[] payload);
 }

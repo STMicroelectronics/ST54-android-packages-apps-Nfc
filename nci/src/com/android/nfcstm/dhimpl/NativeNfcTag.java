@@ -143,7 +143,7 @@ public class NativeNfcTag implements TagEndpoint {
             Log.d(TAG, "Tag lost, restarting polling loop");
             doDisconnect();
             if (tagDisconnectedCallback != null) {
-                tagDisconnectedCallback.onTagDisconnected(mConnectedHandle);
+                tagDisconnectedCallback.onTagDisconnected();
             }
             if (DBG) Log.d(TAG, "Stopping background presence check");
         }

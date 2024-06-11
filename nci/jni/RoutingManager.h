@@ -47,6 +47,13 @@ class RoutingManager {
   bool setNfcSecure(bool enable);
   void updateRoutingTable();
   void eeSetPwrAndLinkCtrl(uint8_t config);
+  void updateIsoDepProtocolRoute(int route);
+  tNFA_TECHNOLOGY_MASK updateTechnologyABRoute(int route);
+  void clearRoutingEntry(int clearFlags);
+
+  static const int CLEAR_AID_ENTRIES = 0x01;
+  static const int CLEAR_PROTOCOL_ENTRIES = 0x02;
+  static const int CLEAR_TECHNOLOGY_ENTRIES = 0x04;
 
  private:
   RoutingManager();
@@ -125,4 +132,5 @@ class RoutingManager {
   SyncEvent mEeInfoEvent;
   SyncEvent mEeSetModeEvent;
   SyncEvent mEePwrAndLinkCtrlEvent;
+  SyncEvent mAidAddRemoveEvent;
 };

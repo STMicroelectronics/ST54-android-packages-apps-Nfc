@@ -20,6 +20,7 @@ import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
+import androidx.annotation.VisibleForTesting;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -43,7 +44,8 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
         private static ForegroundUtils sInstance = null;
     }
 
-    private ForegroundUtils(ActivityManager am) {
+    @VisibleForTesting
+    public ForegroundUtils(ActivityManager am) {
         mActivityManager = am;
         try {
             mActivityManager.addOnUidImportanceListener(
@@ -183,5 +185,15 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
                 }
             }
         }
+    }
+
+    @VisibleForTesting
+    public SparseArray<List<Callback>> getBackgroundCallbacks() {
+        return mBackgroundCallbacks;
+    }
+
+    @VisibleForTesting
+    public void clearForegroundlist() {
+        mForegroundUids.clear();
     }
 }

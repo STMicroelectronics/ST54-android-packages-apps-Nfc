@@ -1,4 +1,8 @@
-cc_library_static {
+package {
+    default_applicable_licenses: ["Android-Apache-2.0"],
+}
+
+cc_library_shared {
     name: "libstnfc_jni",
 
     cflags: [
@@ -6,27 +10,20 @@ cc_library_static {
         "-Wextra",
         "-Wno-unused-parameter",
         "-Werror",
+
         "-DNXP_UICC_ENABLE",
     ],
 
-    srcs: [
-        "CondVar.cpp",
-        "DataQueue.cpp",
-        "IntervalTimer.cpp",
-        "NativeLlcpConnectionlessSocket.cpp",
-        "NativeLlcpServiceSocket.cpp",
-        "NativeLlcpSocket.cpp",
-        "NativeP2pDevice.cpp",
-        "PeerToPeer.cpp",
-        "RouteDataSet.cpp",
-        "PowerSwitch.cpp",
-        "NfcDta.cpp",
-        "NfcStatsUtil.cpp"
-		],
+    srcs: ["**/*.cpp"],
+    exclude_srcs: ["NfcTagTest.cpp"],
 
-    export_include_dirs :
-    [
-      ".",
+    include_dirs: [
+        "vendor/st/opensource/commonsys/system/nfc/src/nfa/include",
+        "vendor/st/opensource/commonsys/system/nfc/src/nfc/include",
+        "vendor/st/opensource/commonsys/system/nfc/src/include",
+        "vendor/st/opensource/commonsys/system/nfc/src/gki/ulinux",
+        "vendor/st/opensource/commonsys/system/nfc/src/gki/common",
+        "vendor/st/opensource/commonsys/system/nfc/utils/include",
     ],
 
     shared_libs: [
@@ -34,24 +31,36 @@ cc_library_static {
         "libcutils",
         "libutils",
         "liblog",
-        "libstnfc-nci",
-        "libchrome",
         "libbase",
-        "libstatslog_nfc_st",
+        // Treble configuration
+        "libhidlbase",
+        "libutils",
+        "libbinder_ndk",
+        "libstatssocket",
+        "libz",
     ],
 
-    static_libs: ["libxml2"],
-
-    export_static_lib_headers:
-    [
-      "libxml2",
+    static_libs: [
+        
+        "android.hardware.nfc@1.0",
+        "android.hardware.nfc@1.1",
+        "android.hardware.nfc@1.2",
+        // Add for AIDL
+        "android.hardware.nfc-V1-ndk",
+        "libstnfcutils",
+        "libstnfc-nci",
+        "libnfc-nci_flags_st",
+        "libstatslog_nfc_st",
+        "android_nfc_flags_aconfig_c_lib",
+        "server_configurable_flags",
+        "libxml2",
     ],
 
     product_variables: {
         debuggable: {
             cflags: [
                 "-DDCHECK_ALWAYS_ON",
-                "-DDTA_ENABLED"
+                "-DDTA_ENABLED",
             ],
         },
     },
@@ -60,60 +69,16 @@ cc_library_static {
         misc_undefined: ["bounds"],
         scs: true,
     },
+    stl: "libc++_static",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.nfcservices",
+    ],
+    required: [
+        // Provide a default libnfc-nci.conf in /system/etc for devices that
+        // does not ship one in /product
+        "libnfc-nci.conf-default",
+    ],
 }
 
-cc_library_headers {
-      name: "libstnfc_jni_headers",
-      export_include_dirs: ["."],
-}
 
-cc_library_static {
-      name: "nfc_jni_files_for_factory",
-      static_libs : [
-          "libstnfc-nci",
-          "libstnfcutils",
-          "libxml2",
-      ],
-      shared_libs : [
-        "libnativehelper",
-        "libcutils",
-        "libutils",
-        "liblog",
-        "libchrome",
-        "libbase",
-      ],
-
-      export_include_dirs :
-      [
-        ".",
-      ],
-
-      header_libs : [
-        "jni_headers",
-        "libhardware_headers",
-      ],
-
-      cflags :
-      [
-        "-Wall",
-        "-Werror",
-        "-Wextra",
-        "-Wno-unused-parameter",
-        "-fvisibility=hidden",
-      ],
-
-      srcs :
-      [
-        "CondVar.cpp",
-        "DataQueue.cpp",
-        "IntervalTimer.cpp",
-        "Mutex.cpp",
-        "NativeLlcpConnectionlessSocket.cpp",
-        "NativeLlcpServiceSocket.cpp",
-        "NativeLlcpSocket.cpp",
-        "NativeP2pDevice.cpp",
-        "PeerToPeer.cpp",
-        "RouteDataSet.cpp",
-      ],
-
-}

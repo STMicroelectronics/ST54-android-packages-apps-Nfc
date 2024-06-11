@@ -80,6 +80,10 @@ public final class NfcWifiProtectedSetup {
                 && !um.hasUserRestrictionForUser(
                         UserManager.DISALLOW_CONFIG_WIFI,
                         // hasUserRestriction does not support UserHandle.CURRENT.
+                        UserHandle.of(ActivityManager.getCurrentUser()))
+                && !um.hasUserRestrictionForUser(
+                        UserManager.DISALLOW_ADD_WIFI_CONFIG,
+                        // hasUserRestriction does not support UserHandle.CURRENT.
                         UserHandle.of(ActivityManager.getCurrentUser()))) {
             Intent configureNetworkIntent =
                     new Intent()

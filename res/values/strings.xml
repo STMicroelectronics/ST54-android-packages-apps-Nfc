@@ -95,15 +95,6 @@
     <!-- Label for the button which causes the URL to be opened -->
     <string name="action_confirm_url_open">Open link</string>
 
-
-    <string name="aid_routing_overflow">NFC Service \'%s\' is over the limit size. Change the
-        default status can make it work.
-    </string>
-    <string name="aid_routing_overflow_default">NFC services are over the limit size. Change the
-        default status can make it work.
-    </string>
-    <string name="aid_routing_overflow_change">Change</string>
-    <string name="aid_routing_overflow_cancel">Cancel</string>
     <!-- Toast string informing the user that NFC tag read failure occurs -->
     <string name="tag_read_error">NFC read error. Try again.</string>
     <!-- Toast string informing the user that no application can handle the NFC tag -->
