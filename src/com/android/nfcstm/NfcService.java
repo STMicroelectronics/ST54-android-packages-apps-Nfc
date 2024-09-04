@@ -13,26 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/**
- * ****************************************************************************
- *
- * <p>The original Work has been changed by ST Microelectronics S.A.
- *
- * <p>Copyright (C) 2017 ST Microelectronics S.A.
- *
- * <p>Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file
- * except in compliance with the License. You may obtain a copy of the License at
- *
- * <p>http://www.apache.org/licenses/LICENSE-2.0
- *
- * <p>Unless required by applicable law or agreed to in writing, software distributed under the
- * License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
- * express or implied. See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * <p>****************************************************************************
- */
-
 package com.android.nfcstm;
 
 import com.android.nfcstm.st.StDeviceHost;
@@ -348,7 +328,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     private static final String OVERFLOW_NTF_ACTION_HIDE =
             "com.android.nfc_extras.action.OF_HIDE_NTF";
 
-    // Timeout to re-apply routing if a tag was present and we postponed it
     private static final int APPLY_ROUTING_RETRY_TIMEOUT_MS = 5000;
 
     // set to true to enable Toast on reading failed, as per AOSP.
@@ -1557,6 +1536,9 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                     }
 
                     if (initialized) {
+                        // TODO(279846422) The system property will be temporary
+                        // available for vendors that depend on it.
+                        // Remove this code when a replacement API is added.
                         SystemProperties.set("nfc.initialized", "true");
                     }
                     if (mIsTagAppPrefSupported) {
@@ -1867,9 +1849,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                 updateAlwaysOnState(NfcAdapter.STATE_OFF);
             } else if (mState == NfcAdapter.STATE_OFF) {
                 /* Special case when mState is OFF but NFCC is already initialized.
-                 * Temperatorily enable NfcAdapter without initialize NFCC and applyRouting.
-                 * And disable NfcAdapter normally with deinitialize.
-                 * All state will switch back to OFF in the end.
+                 * Deinitialize mDevicehost directly.
                  */
                 updateAlwaysOnState(NfcAdapter.STATE_TURNING_OFF);
                 mDeviceHost.setNfceePowerAndLinkCtrl(false);
@@ -5609,7 +5589,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                         }
                         paramsBuilder.setTechMask(techMask);
                     }
-                    // paramsBuilder.setEnableP2p(false);
                 }
                 break;
 

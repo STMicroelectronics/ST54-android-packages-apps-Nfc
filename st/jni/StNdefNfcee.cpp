@@ -306,9 +306,9 @@ bool StNdefNfcee::checkNdefNfceeAvailable() {
 
 /*******************************************************************************
  **
- ** Function:        checkNdefNfceeAvailable
+ ** Function:        getNdefNfceeId
  **
- ** Description:     Checks if NDEF-NFCEE is available
+ ** Description:     s
  **
  ** Returns:         None
  **
@@ -571,8 +571,6 @@ bool StNdefNfcee::disconnect() {
  **
  *******************************************************************************/
 bool StNdefNfcee::selectNdefNfceeAid() {
-  // uint8_t selectAidCmd[] = {
-  //     0x00, 0xA4, 0x04, 0x00, 0x00, NDEF_T4T_AID};
   uint8_t rsp[MAX_RESPONSE_SIZE];
   uint16_t rspLen;
   bool res;
@@ -918,7 +916,7 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool locked) {
 
 /*******************************************************************************
  **
- ** Function:        lockFile
+ ** Function:        isLockedNdefData
  **
  ** Description:     Make file writable or not
  **
