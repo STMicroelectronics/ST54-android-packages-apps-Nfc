@@ -28,9 +28,6 @@ import android.util.Log;
 import com.android.internal.telephony.IccCardConstants;
 import com.android.internal.telephony.TelephonyIntents;
 
-// import com.android.internal.telephony.PhoneConstants;
-// import com.mediatek.nfc.porting.*;
-
 public class NfcSimStateObserver extends BroadcastReceiver {
     private static final String TAG = "NfcSimStateObserver";
     private static final int MSG_TIMEOUT = 1;
