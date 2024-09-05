@@ -46,6 +46,7 @@ class NfcTag {
                                              // service received from
                                              // RF_INTF_ACTIVATED NTF
   int mNumTechList;  // current number of NFC technologies in the list
+  int mNumRfDiscId;
 
   /*******************************************************************************
   **
@@ -159,28 +160,6 @@ class NfcTag {
   **
   *******************************************************************************/
   tNFC_PROTOCOL getProtocol();
-
-  /*******************************************************************************
-  **
-  ** Function:        isP2pDiscovered
-  **
-  ** Description:     Does the peer support P2P?
-  **
-  ** Returns:         True if the peer supports P2P.
-  **
-  *******************************************************************************/
-  bool isP2pDiscovered();
-
-  /*******************************************************************************
-  **
-  ** Function:        selectP2p
-  **
-  ** Description:     Select the preferred P2P technology if there is a choice.
-  **
-  ** Returns:         None
-  **
-  *******************************************************************************/
-  void selectP2p();
 
   /*******************************************************************************
   **

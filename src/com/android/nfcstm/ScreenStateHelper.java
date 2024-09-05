@@ -30,7 +30,6 @@ class ScreenStateHelper {
 
     // Polling mask
     static final int SCREEN_POLLING_TAG_MASK = 0x10;
-    static final int SCREEN_POLLING_P2P_MASK = 0x20;
     static final int SCREEN_POLLING_READER_MASK = 0x40;
 
     private final PowerManager mPowerManager;
@@ -60,6 +59,20 @@ class ScreenStateHelper {
         int ret = prev & 0x0F;
         if (ret == SCREEN_STATE_ON_UNLOCKED) ret = SCREEN_STATE_ON_LOCKED;
         return ret;
+    }
+
+    int checkScreenStateProvisionMode() {
+        if (!mPowerManager.isInteractive()) {
+            if (mKeyguardManager.isDeviceLocked()) {
+                return SCREEN_STATE_OFF_LOCKED;
+            } else {
+                return SCREEN_STATE_OFF_UNLOCKED;
+            }
+        } else if (mKeyguardManager.isDeviceLocked()) {
+            return SCREEN_STATE_ON_LOCKED;
+        } else {
+            return SCREEN_STATE_ON_UNLOCKED;
+        }
     }
 
     /** For debugging only - no i18n */

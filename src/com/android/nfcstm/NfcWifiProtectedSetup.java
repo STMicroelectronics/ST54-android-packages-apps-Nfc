@@ -24,6 +24,7 @@ import android.nfc.NdefRecord;
 import android.nfc.tech.Ndef;
 import android.os.UserHandle;
 import android.os.UserManager;
+
 import java.nio.BufferUnderflowException;
 import java.nio.ByteBuffer;
 import java.util.BitSet;
@@ -79,6 +80,10 @@ public final class NfcWifiProtectedSetup {
         if (wifiConfiguration != null
                 && !um.hasUserRestrictionForUser(
                         UserManager.DISALLOW_CONFIG_WIFI,
+                        // hasUserRestriction does not support UserHandle.CURRENT.
+                        UserHandle.of(ActivityManager.getCurrentUser()))
+                && !um.hasUserRestrictionForUser(
+                        UserManager.DISALLOW_ADD_WIFI_CONFIG,
                         // hasUserRestriction does not support UserHandle.CURRENT.
                         UserHandle.of(ActivityManager.getCurrentUser()))) {
             Intent configureNetworkIntent =

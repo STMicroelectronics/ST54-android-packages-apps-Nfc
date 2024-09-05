@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 #include "StHciEventManager.h"
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <log/log.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include "JavaClassConstants.h"
@@ -26,10 +26,13 @@
 
 using android::base::StringPrintf;
 
-extern bool nfc_debug_enabled;
 const char* APP_NAME = "NfcNci";
 uint8_t StHciEventManager::sEsePipe;
 uint8_t StHciEventManager::sSimPipe;
+uint8_t StHciEventManager::sMep1Pipe;
+uint8_t StHciEventManager::sMep2Pipe;
+std::string sMep1EvtSrc = "eSIM1";
+std::string sMep2EvtSrc = "eSIM2";
 
 /*******************************************************************************
 **
@@ -77,6 +80,8 @@ void StHciEventManager::initialize(nfc_jni_native_data* native) {
   }
   sEsePipe = NfcConfig::getUnsigned(NAME_OFF_HOST_ESE_PIPE_ID, 0x16);
   sSimPipe = NfcConfig::getUnsigned(NAME_OFF_HOST_SIM_PIPE_ID, 0x0A);
+  sMep1Pipe = 0x6E;
+  sMep2Pipe = 0x7E;
 }
 
 /*******************************************************************************
@@ -208,13 +213,15 @@ void StHciEventManager::nfaHciCallback(tNFA_HCI_EVT event,
   std::string evtSrc;
   uint8_t nfceeId = 0x00;
 
-  // Get Host Id (HCI)
-  nfceeId =
-      NfcStExtensions::getInstance().getHostIdForPipe(eventData->rcvd_evt.pipe);
-  // Get NFCEE Id
-  nfceeId = StSecureElement::getInstance().getSENfceeId(nfceeId);
-  // Check which NFCEE is connected
-  nfceeId = StSecureElement::getInstance().getConnectedNfceeId(nfceeId);
+  if (eventData->rcvd_evt.pipe == sEsePipe) {
+    nfceeId = StSecureElement::getInstance().getConnectedNfceeId(0x86);
+  } else if (eventData->rcvd_evt.pipe == sSimPipe) {
+    nfceeId = StSecureElement::getInstance().getConnectedNfceeId(0x81);
+  } else if (eventData->rcvd_evt.pipe == sMep1Pipe) {
+    nfceeId = 0x87;
+  } else if (eventData->rcvd_evt.pipe == sMep2Pipe) {
+    nfceeId = 0x89;
+  }
 
   switch (nfceeId) {
     case 0x81:
@@ -231,12 +238,18 @@ void StHciEventManager::nfaHciCallback(tNFA_HCI_EVT event,
     case 0x84:
       evtSrc = "DHSE1";
       break;
+    case 0x87:
+      evtSrc = sMep1EvtSrc;
+      break;
+    case 0x89:
+      evtSrc = sMep2EvtSrc;
+      break;
     default:
       LOG(WARNING) << fn << "; Incorrect Pipe Id";
       return;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+  LOG(DEBUG) << StringPrintf(
       "%s; event=0x%x code=0x%x pipe=0x%x len=%d host=%s", fn, event,
       eventData->rcvd_evt.evt_code, eventData->rcvd_evt.pipe,
       eventData->rcvd_evt.evt_len, evtSrc.c_str());

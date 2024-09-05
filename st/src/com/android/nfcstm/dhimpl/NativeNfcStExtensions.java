@@ -53,7 +53,7 @@ public class NativeNfcStExtensions {
 
     public native void setRfConfiguration(int modeBitmap, byte[] techArray);
 
-    public native int getRfConfiguration(byte[] techArray);
+    public native void getRfConfiguration(byte[] techArray);
 
     public native void setRfBitmap(int modeBitmap);
 

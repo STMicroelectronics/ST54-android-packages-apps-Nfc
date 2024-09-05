@@ -16,8 +16,8 @@
 
 #include "StNfcJni.h"
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <errno.h>
 #include <log/log.h>
 #include <nativehelper/JNIHelp.h>
@@ -26,8 +26,6 @@
 #include "StRoutingManager.h"
 
 using android::base::StringPrintf;
-
-extern bool nfc_debug_enabled;
 
 /*******************************************************************************
 **
@@ -41,7 +39,7 @@ extern bool nfc_debug_enabled;
 **
 *******************************************************************************/
 jint JNI_OnLoad(JavaVM* jvm, void*) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
+  LOG(DEBUG) << StringPrintf("%s; enter", __func__);
   JNIEnv* e = NULL;
 
   // Check JNI version
@@ -49,15 +47,7 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
 
   if (android::register_com_android_nfc_stNativeNfcManager(e) == -1)
     return JNI_ERR;
-  if (android::register_com_android_nfc_NativeLlcpServiceSocket(e) == -1)
-    return JNI_ERR;
-  if (android::register_com_android_nfc_NativeLlcpSocket(e) == -1)
-    return JNI_ERR;
   if (android::register_com_android_nfc_NativeNfcTag(e) == -1) return JNI_ERR;
-  if (android::register_com_android_nfc_NativeLlcpConnectionlessSocket(e) == -1)
-    return JNI_ERR;
-  if (android::register_com_android_nfc_NativeP2pDevice(e) == -1)
-    return JNI_ERR;
   if (android::register_com_android_nfc_stNativeNfcSecureElement(e) == -1)
     return JNI_ERR;
   if (android::register_com_android_nfc_NativeNfcStExtensions(e) == -1)
@@ -66,7 +56,7 @@ jint JNI_OnLoad(JavaVM* jvm, void*) {
     return JNI_ERR;
   if (StRoutingManager::getInstance().registerJniFunctions(e) == -1)
     return JNI_ERR;
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
+  LOG(DEBUG) << StringPrintf("%s; exit", __func__);
   return JNI_VERSION_1_6;
 }
 

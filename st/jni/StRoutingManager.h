@@ -34,6 +34,9 @@ typedef enum { ROUTING_TYPE_F, ROUTING_SYSTEM_CODE } eJNI_ROUTING_TYPE;
 
 class StRoutingManager {
  public:
+  bool mIsMepUpdating;
+  bool mDeinitializing;
+
   static StRoutingManager& getInstance();
   bool initialize(nfc_jni_native_data* native);
   void deinitialize();
@@ -50,6 +53,9 @@ class StRoutingManager {
   bool setNfcSecure(bool enable);
   void updateRoutingTable();
   void eeSetPwrAndLinkCtrl(uint8_t config);
+  void updateIsoDepProtocolRoute(int route);
+  tNFA_TECHNOLOGY_MASK updateTechnologyABRoute(int route);
+  void clearRoutingEntry(int clearFlags);
   void forceRouting(uint8_t nfceeid);
   void stopforceRouting();
   void nfceeDiscover();
@@ -66,13 +72,21 @@ class StRoutingManager {
 
   bool setSEFelicaCardEnable(bool status);
 
-  void setMuteTech(uint8_t bitmap);
-  uint8_t getMuteTech();
+  void setDiscoveryTech(int poll_mask, int listen_mask);
+  void getDiscoveryTech(int* poll_mask, int* listen_mask);
 
   int getRemainingLmrtSize();
   void notifyAidAdded();
   uint8_t getDisconnectedUiccId();
   void setDisconnectedUiccId(uint8_t id);
+
+  static void nfaEeCallback(tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* eventData);
+
+  static const int CLEAR_AID_ENTRIES = 0x01;
+  static const int CLEAR_PROTOCOL_ENTRIES = 0x02;
+  static const int CLEAR_TECHNOLOGY_ENTRIES = 0x04;
+  void setEeInfoChangedFlag();
+  void notifyEeUpdated();
 
  private:
   StRoutingManager();
@@ -84,11 +98,9 @@ class StRoutingManager {
                   tNFA_STATUS status);
   void notifyActivated(uint8_t technology);
   void notifyDeactivated(uint8_t technology);
-  void notifyEeUpdated();
   tNFA_TECHNOLOGY_MASK updateEeTechRouteSetting();
   void updateDefaultProtocolRoute();
   void updateDefaultRoute();
-  void updateFullRoutes();
   // See AidRoutingManager.java for corresponding
   // AID_MATCHING_ constants
 
@@ -118,10 +130,7 @@ class StRoutingManager {
   static const int TECH_A_ISO_DEP = 0x02;
   static const int TECH_B_ISO_DEP = 0x04;
 
-  static void nfaEeCallback(tNFA_EE_EVT event, tNFA_EE_CBACK_DATA* eventData);
   static void nfcFCeCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
-
-  void setEeInfoChangedFlag();
 
   static int com_android_nfc_cardemulation_doGetDefaultRouteDestination(
       JNIEnv* e);
@@ -171,6 +180,8 @@ class StRoutingManager {
   int mWantedDefaultScRoute;
   int mWantedDefaultAidRoute;
 
+  bool mWantedAidRouteOnUicc;
+
   uint8_t mDisconnectedUicc;
   int mPreviousScRoute;
 
@@ -184,16 +195,17 @@ class StRoutingManager {
   uint8_t mDefaultSysCodePowerstate;
   uint8_t mOffHostAidRoutingPowerState;
   uint8_t mHostListenTechMask;
-  bool mDeinitializing;
   bool mEeInfoChanged;
   bool mReceivedEeInfo;
   bool mAidRoutingConfigured;
 
+  bool mReceivedMepEeInfo;
   bool mScRoutingConfigured;
 
   bool mIsSEFelicaCard;
 
-  uint8_t mMuteTechBitmap;
+  int mDiscPollMask;
+  int mDiscListenMask;
 
   uint16_t mRemainingLmrtSize;
   struct OnHostEmulationDataData {
@@ -205,13 +217,19 @@ class StRoutingManager {
   tNFA_EE_DISCOVER_REQ mEeInfo;
   tNFA_TECHNOLOGY_MASK mSeTechMask;
   static const JNINativeMethod sMethods[];
+
+  int mCeAidOnDHHandle;
+  uint8_t mLastIsoDepListenMask;
+
   SyncEvent mEeRegisterEvent;
   SyncEvent mRoutingEvent;
   SyncEvent mEeUpdateEvent;
   SyncEvent mEeInfoEvent;
   SyncEvent mEeSetModeEvent;
   SyncEvent mEePwrAndLinkCtrlEvent;
+  SyncEvent mAidAddRemoveEvent;
   SyncEvent mEeForceRoutingEvent;
   SyncEvent mEeDiscoverEvent;
   SyncEvent mEeRemaingLmrtSizeEvent;
+  SyncEvent mCeRegisterAiOnDHdEvent;
 };

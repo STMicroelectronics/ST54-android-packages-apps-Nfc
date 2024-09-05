@@ -15,8 +15,8 @@
  *
  *  Provide extensions for the ST implementation of the NFC stack
  */
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include <nativehelper/ScopedPrimitiveArray.h>
 
@@ -28,7 +28,6 @@
 #include "StNdefNfcee.h"
 
 using android::base::StringPrintf;
-extern bool nfc_debug_enabled;
 
 #define IS_64BIT (sizeof(void *) == 8)
 namespace android {
@@ -175,25 +174,6 @@ static jboolean nativeNfcStExtensions_isSEConnected(JNIEnv *e, jobject,
 
 /*******************************************************************************
 **
-** Function:        nativeNfcStExtensions_setRfConfiguration
-**
-** Description:     Connect to the secure element.
-**                  e: JVM environment.
-**                  o: Java object.
-**
-** Returns:         Handle of secure element.  values < 0 represent failure.
-**
-*******************************************************************************/
-static void nativeNfcStExtensions_setRfConfiguration(JNIEnv *e, jobject,
-                                                     jint modeBitmap,
-                                                     jbyteArray techArray) {
-  ScopedByteArrayRW bytes(e, techArray);
-  NfcStExtensions::getInstance().setRfConfiguration(
-      modeBitmap, reinterpret_cast<uint8_t *>(&bytes[0]));
-}
-
-/*******************************************************************************
-**
 ** Function:        nativeNfcStExtensions_getRfConfiguration
 **
 ** Description:     Connect to the secure element.
@@ -203,18 +183,16 @@ static void nativeNfcStExtensions_setRfConfiguration(JNIEnv *e, jobject,
 ** Returns:         Handle of secure element.  values < 0 represent failure.
 **
 *******************************************************************************/
-static int nativeNfcStExtensions_getRfConfiguration(JNIEnv *e, jobject,
-                                                    jbyteArray techArray) {
-  uint8_t outputArray[NfcStExtensions::getInstance().RF_CONFIG_ARRAY_SIZE];
-  int modeBitmap;
+static void nativeNfcStExtensions_getRfConfiguration(JNIEnv *e, jobject,
+                                                     jbyteArray techArray) {
+  uint8_t outputArray[2];
+  uint8_t pollMask = 0, listenMask = 0;
 
-  modeBitmap = NfcStExtensions::getInstance().getRfConfiguration(outputArray);
+  NfcStExtensions::getInstance().getRfConfiguration(&pollMask, &listenMask);
+  outputArray[0] = pollMask;
+  outputArray[1] = listenMask;
 
-  e->SetByteArrayRegion(techArray, 0,
-                        NfcStExtensions::getInstance().RF_CONFIG_ARRAY_SIZE,
-                        (jbyte *)outputArray);
-
-  return modeBitmap;
+  e->SetByteArrayRegion(techArray, 0, 2, (jbyte *)outputArray);
 }
 
 /*******************************************************************************
@@ -266,7 +244,7 @@ static void nativeNfcStExtensions_setProprietaryConfigSettings(
 *******************************************************************************/
 static jint nativeNfcStExtensions_getPipesList(JNIEnv *e, jobject, jint host_id,
                                                jbyteArray list) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
+  LOG(DEBUG) << StringPrintf("%s; enter;", __func__);
   int i, nb_pipes = 0, host_idx;
 
   NfcStExtensions::getInstance().getPipesInfo();
@@ -283,16 +261,15 @@ static jint nativeNfcStExtensions_getPipesList(JNIEnv *e, jobject, jint host_id,
 
   nb_pipes = NfcStExtensions::getInstance().mPipesInfo[host_idx].nb_pipes;
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; nb_pipes: %d", __func__, nb_pipes);
+  LOG(DEBUG) << StringPrintf("%s; nb_pipes: %d", __func__, nb_pipes);
 
   uint8_t listArray[nb_pipes];
 
   for (i = 0; i < nb_pipes; i++) {
     listArray[i] =
         NfcStExtensions::getInstance().mPipesInfo[host_idx].data[i].pipe_id;
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; listArray[%d]= 0x%x", __func__, i, listArray[i]);
+    LOG(DEBUG) << StringPrintf("%s; listArray[%d]= 0x%x", __func__, i,
+                               listArray[i]);
   }
 
   e->SetByteArrayRegion(list, 0, nb_pipes, (jbyte *)listArray);
@@ -314,7 +291,7 @@ static jint nativeNfcStExtensions_getPipesList(JNIEnv *e, jobject, jint host_id,
 *******************************************************************************/
 static void nativeNfcStExtensions_getPipeInfo(JNIEnv *e, jobject, jint host_id,
                                               jint pipe_id, jbyteArray info) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
+  LOG(DEBUG) << StringPrintf("%s; enter;", __func__);
   int i, nb_pipes = 0, host_idx;
 
   if (host_id == 1) {
@@ -329,8 +306,8 @@ static void nativeNfcStExtensions_getPipeInfo(JNIEnv *e, jobject, jint host_id,
   nb_pipes = NfcStExtensions::getInstance().mPipesInfo[host_idx].nb_pipes;
 
   if (nb_pipes == 0xFF) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; getPipesInfo() was not called!!;", __func__);
+    LOG(DEBUG) << StringPrintf("%s; getPipesInfo() was not called!!;",
+                               __func__);
     return;
   }
 
@@ -478,8 +455,8 @@ static jbyteArray nativeNfcStExtensions_getNciConfig(JNIEnv *e, jobject,
     e->SetByteArrayRegion(result, 0, recvBufferActualSize, (jbyte *)recvBuffer);
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; exit: received data length =%d", __func__, recvBufferActualSize);
+  LOG(DEBUG) << StringPrintf("%s; exit: received data length =%d", __func__,
+                             recvBufferActualSize);
   return result;
 }
 
@@ -570,7 +547,7 @@ static void nativeNfcStExtensions_sendPropSetConfig(JNIEnv *e, jobject,
 static jbyteArray nativeNfcStExtensions_sendPropGetConfig(JNIEnv *e, jobject,
                                                           jint configSubSetId,
                                                           jint paramId) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
+  LOG(DEBUG) << StringPrintf("%s; enter;", __func__);
 
   uint16_t recvBufferActualSize = 0;
   uint8_t recvBuffer[256];
@@ -583,8 +560,8 @@ static jbyteArray nativeNfcStExtensions_sendPropGetConfig(JNIEnv *e, jobject,
     e->SetByteArrayRegion(result, 0, recvBufferActualSize, (jbyte *)recvBuffer);
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; exit: received data length =%hu", __func__, recvBufferActualSize);
+  LOG(DEBUG) << StringPrintf("%s; exit: received data length =%hu", __func__,
+                             recvBufferActualSize);
   return result;
 }
 
@@ -603,7 +580,7 @@ static jbyteArray nativeNfcStExtensions_sendPropTestCmd(JNIEnv *e, jobject,
                                                         jint OID, jint subCode,
                                                         jbyteArray paramTx,
                                                         jint lengthTx) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter;", __func__);
+  LOG(DEBUG) << StringPrintf("%s; enter;", __func__);
   uint16_t recvBufferActualSize = 0;
   uint8_t recvBuffer[256];
 
@@ -617,8 +594,8 @@ static jbyteArray nativeNfcStExtensions_sendPropTestCmd(JNIEnv *e, jobject,
     e->SetByteArrayRegion(result, 0, recvBufferActualSize, (jbyte *)recvBuffer);
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; exit: received data length =%d", __func__, recvBufferActualSize);
+  LOG(DEBUG) << StringPrintf("%s; exit: received data length =%d", __func__,
+                             recvBufferActualSize);
   return result;
 }
 
@@ -717,9 +694,7 @@ static JNINativeMethod gMethods[] = {
     {"isUiccConnected", "()Z", (void *)nativeNfcStExtensions_isUiccConnected},
     {"iseSEConnected", "()Z", (void *)nativeNfcStExtensions_iseSEConnected},
     {"isSEConnected", "(I)Z", (void *)nativeNfcStExtensions_isSEConnected},
-    {"setRfConfiguration", "(I[B)V",
-     (void *)nativeNfcStExtensions_setRfConfiguration},
-    {"getRfConfiguration", "([B)I",
+    {"getRfConfiguration", "([B)V",
      (void *)nativeNfcStExtensions_getRfConfiguration},
     {"getProprietaryConfigSettings", "(III)Z",
      (void *)nativeNfcStExtensions_getProprietaryConfigSettings},

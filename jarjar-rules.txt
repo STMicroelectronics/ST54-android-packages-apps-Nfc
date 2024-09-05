@@ -1,5 +1,7 @@
+# Used by com.android.nfcstm
+
 # android.se.omapi-V1-java
-rule android.se.omapi.** com.android.nfcstm.x.@0
+rule android.se.omapi.I** com.android.nfcstm.x.@0
 # Use our statically linked PlatformProperties library
 rule android.sysprop.** com.android.nfcstm.x.@0
 # androidx.annotation_annotation
@@ -8,3 +10,34 @@ rule androidx.annotation.** com.android.nfcstm.x.@0
 rule androidx.appcompat.app.** com.android.nfcstm.x.@0
 # com.google.android.material_material
 rule com.google.android.material.** com.android.nfcstm.x.@0
+rule com.android.internal.util.FastXmlSerializer* com.android.nfcstm.x.@0
+
+# Used for proto debug dumping
+rule android.app.PendingIntentProto* com.android.nfcstm.x.@0
+rule android.content.ComponentNameProto* com.android.nfcstm.x.@0
+rule android.content.IntentProto* com.android.nfcstm.x.@0
+rule android.content.IntentFilterProto* com.android.nfcstm.x.@0
+rule android.content.AuthorityEntryProto* com.android.nfcstm.x.@0
+rule android.nfc.cardemulation.AidGroupProto* com.android.nfcstm.x.@0
+rule android.nfc.cardemulation.ApduServiceInfoProto* com.android.nfcstm.x.@0
+rule android.nfc.cardemulation.NfcFServiceInfoProto* com.android.nfcstm.x.@0
+rule android.nfc.NdefMessageProto* com.android.nfcstm.x.@0
+rule android.nfc.NdefRecordProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.CardEmulationManagerProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.RegisteredServicesCacheProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.RegisteredNfcFServicesCacheProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.PreferredServicesProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.EnabledNfcFServicesProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.RegisteredAidCacheProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.AidRoutingManagerProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.RegisteredT3tIdentifiersCacheProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.SystemCodeRoutingManagerProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.HostEmulationManagerProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.cardemulation.HostNfcFEmulationManagerProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.NfcServiceDumpProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.DiscoveryParamsProto* com.android.nfcstm.x.@0
+rule com.android.nfcstm.NfcDispatcherProto* com.android.nfcstm.x.@0
+rule android.os.PersistableBundleProto* com.android.nfcstm.x.@0
+
+# Core utils available for modules
+rule com.android.modules.utils.** com.android.nfcstm.x.@0

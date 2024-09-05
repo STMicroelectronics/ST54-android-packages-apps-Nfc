@@ -28,6 +28,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.res.Resources;
 import android.os.Bundle;
+
 import com.android.nfcstm.R;
 
 public class ConfirmConnectActivity extends Activity {
@@ -81,7 +82,9 @@ public class ConfirmConnectActivity extends Activity {
         mAlert.show();
 
         registerReceiver(
-                mReceiver, new IntentFilter(BluetoothPeripheralHandover.ACTION_TIMEOUT_CONNECT));
+                mReceiver,
+                new IntentFilter(BluetoothPeripheralHandover.ACTION_TIMEOUT_CONNECT),
+                RECEIVER_EXPORTED);
     }
 
     @Override

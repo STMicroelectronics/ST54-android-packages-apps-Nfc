@@ -16,8 +16,8 @@
  *  Provide extensions for the ST implementation of the NFC stack
  */
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <errno.h>
 #include <malloc.h>
 #include <nativehelper/ScopedLocalRef.h>
@@ -36,7 +36,6 @@
  **
  *****************************************************************************/
 using android::base::StringPrintf;
-extern bool nfc_debug_enabled;
 extern SyncEvent gIsReconfiguringDiscovery;
 extern Mutex gMutexEE;
 
@@ -96,7 +95,7 @@ void StNdefNfcee::initialize(nfc_jni_native_data* native) {
   tNFA_STATUS nfaStat;
   {
     SyncEventGuard guard(mEeRegisterEvent);
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; try ee register", fn);
+    LOG(DEBUG) << StringPrintf("%s; try ee register", fn);
     nfaStat = NFA_EeRegister(nfaEeCallback);
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf("%s; fail ee register; error=0x%X", fn,
@@ -133,7 +132,7 @@ void StNdefNfcee::finalize() {}
  *******************************************************************************/
 void StNdefNfcee::abortWaits() {
   static const char fn[] = "StNdefNfcee::abortWaits";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+  LOG(DEBUG) << StringPrintf("%s", fn);
 
   {
     SyncEventGuard g(mEeRegisterEvent);
@@ -176,8 +175,8 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
   switch (event) {
     case NFA_EE_REGISTER_EVT: {
       SyncEventGuard guard(StNdefNfcee.mEeRegisterEvent);
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_REGISTER_EVT; status=%u", fn, eventData->ee_register);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REGISTER_EVT; status=%u", fn,
+                                 eventData->ee_register);
       StNdefNfcee.mNfaEECbStatus = eventData->ee_register;
       StNdefNfcee.mEeRegisterEvent.notifyOne();
     } break;
@@ -188,7 +187,7 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
         break;
       }
       SyncEventGuard guard(StNdefNfcee.mEeSetModeEvent);
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      LOG(DEBUG) << StringPrintf(
           "%s; NFA_EE_MODE_SET_EVT; status: 0x%04X  handle: 0x%04X", fn,
           eventData->mode_set.status, eventData->mode_set.ee_handle);
 
@@ -203,7 +202,7 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_DISCOVER_REQ_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      LOG(DEBUG) << StringPrintf(
           "%s; NFA_EE_DISCOVER_REQ_EVT; status=0x%X; num ee=%u", __func__,
           eventData->discover_req.status, eventData->discover_req.num_ee);
 
@@ -212,7 +211,7 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
 
     case NFA_EE_CONNECT_EVT: {
       SyncEventGuard guard(StNdefNfcee.mEeCreateConnEvent);
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      LOG(DEBUG) << StringPrintf(
           "%s; NFA_EE_CONNECT_EVT; status=%u, handle=0x%02X, interface=0x%02X",
           fn, eventData->connect.status, eventData->connect.ee_handle,
           eventData->connect.ee_interface);
@@ -223,9 +222,9 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
 
     case NFA_EE_DATA_EVT: {
       SyncEventGuard guard(StNdefNfcee.mEeDataEvent);
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_DATA_EVT; handle=0x%02X, length=0x%02X",
-                          fn, eventData->data.handle, eventData->data.len);
+      LOG(DEBUG) << StringPrintf(
+          "%s; NFA_EE_DATA_EVT; handle=0x%02X, length=0x%02X", fn,
+          eventData->data.handle, eventData->data.len);
 
       for (int i = 0; i < eventData->data.len; i++) {
         StNdefNfcee.mResponseData[i] = eventData->data.p_buf[i];
@@ -237,30 +236,29 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_DISCONNECT_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_DISCONNECT_EVT; handle=0x%02X", fn,
-                          eventData->data.handle);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_DISCONNECT_EVT; handle=0x%02X", fn,
+                                 eventData->data.handle);
       // mEeDisconnEvent
       SyncEventGuard guard(StNdefNfcee.mEeDisconnEvent);
       StNdefNfcee.mEeDisconnEvent.notifyOne();
     } break;
 
     case NFA_EE_SET_TECH_CFG_EVT:
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_SET_TECH_CFG_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_SET_TECH_CFG_EVT; status=0x%X", fn,
+                                 eventData->status);
+      // StRoutingManager::getInstance().nfaEeCallback(event, eventData);
       break;
     case NFA_EE_SET_PROTO_CFG_EVT:
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_SET_PROTO_CFG_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_SET_PROTO_CFG_EVT; status=0x%X",
+                                 fn, eventData->status);
       break;
     case NFA_EE_UPDATED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_UPDATED_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_UPDATED_EVT", fn);
       break;
     }
     case NFA_EE_REMOVE_AID_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_REMOVE_AID_EVT  status=%u", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REMOVE_AID_EVT  status=%u", fn,
+                                 eventData->status);
       StRoutingManager::getInstance().notifyAidAdded();
     } break;
 
@@ -276,8 +274,8 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
       break;
 
     case NFA_EE_ADD_AID_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_ADD_AID_EVT  status=%u", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_ADD_AID_EVT  status=%u", fn,
+                                 eventData->status);
       StRoutingManager::getInstance().notifyAidAdded();
     } break;
 
@@ -298,8 +296,7 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
  *******************************************************************************/
 bool StNdefNfcee::checkNdefNfceeAvailable() {
   bool status = (getNdefNfceeId(NULL) == 0x00 ? false : true);
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; status: %d ", __func__, status);
+  LOG(DEBUG) << StringPrintf("%s; status: %d ", __func__, status);
 
   return status;
 }
@@ -336,8 +333,7 @@ int StNdefNfcee::getNdefNfceeId(uint8_t* nciStatus) {
     }
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; nfceeId: 0x%02X", __func__, nfceeId);
+  LOG(DEBUG) << StringPrintf("%s; nfceeId: 0x%02X", __func__, nfceeId);
 
   gMutexEE.unlock();
   return nfceeId;
@@ -361,21 +357,21 @@ bool StNdefNfcee::enable(bool enable) {
   int ndefNfceeId = getNdefNfceeId(&ee_status);
 
   if (ndefNfceeId != 0x00) {  // found
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; %s NDEF-NFCEE 0x%02X", fn,
-        (enable == true) ? "Enabling" : "Disabling", ndefNfceeId);
+    LOG(DEBUG) << StringPrintf("%s; %s NDEF-NFCEE 0x%02X", fn,
+                               (enable == true) ? "Enabling" : "Disabling",
+                               ndefNfceeId);
 
     if (((ee_status != NFA_EE_STATUS_ACTIVE) && (enable == true)) ||
         ((ee_status == NFA_EE_STATUS_ACTIVE) && (enable == false))) {
       SyncEventGuard guard(mEeSetModeEvent);
       if ((nfaStat = NFA_EeModeSet(ndefNfceeId, enable)) == NFA_STATUS_OK) {
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-            "%s; Waiting for NFCEE_MODE_SET_NTF; h=0x%X", fn, ndefNfceeId);
+        LOG(DEBUG) << StringPrintf("%s; Waiting for NFCEE_MODE_SET_NTF; h=0x%X",
+                                   fn, ndefNfceeId);
 
         // wait for NFA_EE_MODE_SET_EVT
         if (mEeSetModeEvent.wait(500) == false) {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s; timeout waiting for NFCEE_MODE_SET_NTF", fn);
+          LOG(DEBUG) << StringPrintf(
+              "%s; timeout waiting for NFCEE_MODE_SET_NTF", fn);
           goto TheEnd;
         }
 
@@ -387,8 +383,7 @@ bool StNdefNfcee::enable(bool enable) {
           goto TheEnd;
         }
       } else {
-        DLOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s; already in the requested state", fn);
+        LOG(DEBUG) << StringPrintf("%s; already in the requested state", fn);
       }
       /* NDEF-NFCEE is in the requested state */
       status = true;
@@ -431,8 +426,8 @@ bool StNdefNfcee::connect() {
     goto TheEnd;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; enter; requesting to connect CEE 0x%x", fn, mNdefNfceeId);
+  LOG(DEBUG) << StringPrintf("%s; enter; requesting to connect CEE 0x%x", fn,
+                             mNdefNfceeId);
 
   // Check if in RF state idle
   if (android::isDiscoveryStarted()) {
@@ -443,8 +438,8 @@ bool StNdefNfcee::connect() {
   // Create logical connection to NFCEE
   {
     SyncEventGuard guard(mEeCreateConnEvent);
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; Create logical connection to NFCEE; h=0x%X", fn, mNdefNfceeId);
+    LOG(DEBUG) << StringPrintf("%s; Create logical connection to NFCEE; h=0x%X",
+                               fn, mNdefNfceeId);
     if ((nfaStat = NFA_EeConnect(mNdefNfceeId, NFA_EE_INTERFACE_APDU,
                                  nfaEeCallback)) == NFA_STATUS_OK) {
       mEeCreateConnEvent.wait();  // wait for NFA_EE_MODE_SET_EVT
@@ -488,29 +483,28 @@ bool StNdefNfcee::transceive(uint16_t tx_data_len, uint8_t* tx_data,
   static const char fn[] = "StNdefNfcee::transceive";
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; enter; NFCEE ID = 0x%x; data len=0x%x;", fn,
-                      mNdefNfceeId, tx_data_len);
+  LOG(DEBUG) << StringPrintf("%s; enter; NFCEE ID = 0x%x; data len=0x%x;", fn,
+                             mNdefNfceeId, tx_data_len);
 
   if (mNdefNfceeId == NO_NDEF_NFCEE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; enter; Requested NFCEE Id is not connected", fn);
+    LOG(DEBUG) << StringPrintf("%s; enter; Requested NFCEE Id is not connected",
+                               fn);
     return false;
   }
 
   nfaStat = NFA_EeSendData(mNdefNfceeId, tx_data_len, tx_data);
 
   if (nfaStat != NFA_STATUS_OK) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; enter; Error when calling NFA_EeSendData()", fn);
+    LOG(DEBUG) << StringPrintf("%s; enter; Error when calling NFA_EeSendData()",
+                               fn);
     return false;
   }
 
   // Wait for response, when receiving evt  NFA_EE_DATA_EVT
   SyncEventGuard guard(mEeDataEvent);
   if (mEeDataEvent.wait(500) == false) {  // if timeout occurred
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; timeout waiting for answer to NFCEE data", fn);
+    LOG(DEBUG) << StringPrintf("%s; timeout waiting for answer to NFCEE data",
+                               fn);
     return false;
   }
 
@@ -537,7 +531,7 @@ bool StNdefNfcee::disconnect() {
   tNFA_HANDLE eeHandle;
 
   if (mNdefNfceeId == NO_NDEF_NFCEE) {
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+    LOG(DEBUG) << StringPrintf(
         "%s; enter; Requested NFCEE Id is already disconnected", fn);
     return false;
   }
@@ -547,8 +541,8 @@ bool StNdefNfcee::disconnect() {
   // Close the connection
   {
     SyncEventGuard guard(mEeDisconnEvent);
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; Close the connection; h=0x%X", fn, eeHandle);
+    LOG(DEBUG) << StringPrintf("%s; Close the connection; h=0x%X", fn,
+                               eeHandle);
     if ((nfaStat = NFA_EeDisconnect(eeHandle)) == NFA_STATUS_OK) {
       mEeDisconnEvent.wait();  // wait for NFA_EE_DISCONNECT_EVT
     } else {
@@ -592,15 +586,13 @@ bool StNdefNfcee::selectNdefNfceeAid() {
     // Get AID length
     aidLen = param[3];
 
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; aidLen = 0x%x", __func__, aidLen);
+    LOG(DEBUG) << StringPrintf("%s; aidLen = 0x%x", __func__, aidLen);
 
     if ((aidLen >= 5) && (aidLen <= 16)) {
       selectAidCmd = (uint8_t*)malloc(aidLen + 5);
     }
   } else {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Invalid AID length", __func__);
+    LOG(ERROR) << StringPrintf("%s; Invalid AID length", __func__);
     return false;
   }
 
@@ -613,8 +605,7 @@ bool StNdefNfcee::selectNdefNfceeAid() {
 
     memcpy(&selectAidCmd[5], &param[4], aidLen);
   } else {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; malloc failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; malloc failed", __func__);
     return false;
   }
 
@@ -623,8 +614,7 @@ bool StNdefNfcee::selectNdefNfceeAid() {
   free(selectAidCmd);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Select T4T AID failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Select T4T AID failed", __func__);
     return false;
   }
 
@@ -650,7 +640,7 @@ bool StNdefNfcee::readAndParseCC(uint8_t* cc_file_content,
   uint16_t offset;
   bool res;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; ", __func__);
+  LOG(DEBUG) << StringPrintf("%s; ", __func__);
 
   /* Select the application */
   if (!selectNdefNfceeAid()) {
@@ -661,8 +651,8 @@ bool StNdefNfcee::readAndParseCC(uint8_t* cc_file_content,
   res = transceive(sizeof(selectCcCmd), selectCcCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Select Capability Container failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Select Capability Container failed",
+                               __func__);
     return false;
   }
 
@@ -670,23 +660,21 @@ bool StNdefNfcee::readAndParseCC(uint8_t* cc_file_content,
   res = transceive(sizeof(readLenCmd), readLenCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Read CC length failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Read CC length failed", __func__);
     return false;
   }
   if (rspLen != 4) {
-    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
-        "%s; Read CC length returned unexpected data", __func__);
+    LOG(ERROR) << StringPrintf("%s; Read CC length returned unexpected data",
+                               __func__);
     return false;
   }
   if (rsp[0] != 0x00) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; CC length > 255 not supported yet", __func__);
+    LOG(ERROR) << StringPrintf("%s; CC length > 255 not supported yet",
+                               __func__);
     return false;
   }
   if (rsp[1] < 0x0F) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; CC length < 0x0F is invalid", __func__);
+    LOG(ERROR) << StringPrintf("%s; CC length < 0x0F is invalid", __func__);
     return false;
   }
 
@@ -695,16 +683,14 @@ bool StNdefNfcee::readAndParseCC(uint8_t* cc_file_content,
   res = transceive(sizeof(readDataCmd), readDataCmd, rspLen, rsp);
   if ((res == false) || (rspLen < (readDataCmd[4] + 2)) ||
       (rsp[rspLen - 2] != 0x90) || (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Read CC data failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Read CC data failed", __func__);
     return false;
   }
 
   /* Parse the data */
   if ((rsp[0] != 0x20) && (rsp[0] != 0x30)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; CC mapping version %d.%d unsupported", __func__,
-                        rsp[0] >> 4, rsp[0] & 0xF);
+    LOG(ERROR) << StringPrintf("%s; CC mapping version %d.%d unsupported",
+                               __func__, rsp[0] >> 4, rsp[0] & 0xF);
     return false;
   }
 
@@ -712,8 +698,7 @@ bool StNdefNfcee::readAndParseCC(uint8_t* cc_file_content,
   mMle = (rsp[1] << 8) + rsp[2];
   mMlc = (rsp[3] << 8) + rsp[4];
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; Mle: 0x%x, Mlc: 0x%x", __func__, mMle, mMlc);
+  LOG(DEBUG) << StringPrintf("%s; Mle: 0x%x, Mlc: 0x%x", __func__, mMle, mMlc);
 
   // Copy received data to buffer
   memcpy(cc_file_content, rsp, rspLen);
@@ -743,11 +728,10 @@ bool StNdefNfcee::readAndParseCC(uint8_t* cc_file_content,
       mCCInfo[mCCInfoCnt].wr_access = (rsp[start + 9] == 0x00);
       mCCInfo[mCCInfoCnt].offset_wr_byte = start + 9 + 2;
     } else {
-      DLOG_IF(ERROR, nfc_debug_enabled)
-          << StringPrintf("%s; Invalid TLV length in CC", __func__);
+      LOG(ERROR) << StringPrintf("%s; Invalid TLV length in CC", __func__);
       return false;
     }
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+    LOG(DEBUG) << StringPrintf(
         "%s; File %02hhX%02hhX (%hhx) size %d mode %s", __func__,
         mCCInfo[mCCInfoCnt].fileId[0], mCCInfo[mCCInfoCnt].fileId[1],
         mCCInfo[mCCInfoCnt].type, (int)mCCInfo[mCCInfoCnt].size,
@@ -783,8 +767,8 @@ bool StNdefNfcee::getFileContent(uint8_t fileId[2], uint32_t* len,
     return false;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; FileId = 0x%02X%02X", __func__, fileId[0], fileId[1]);
+  LOG(DEBUG) << StringPrintf("%s; FileId = 0x%02X%02X", __func__, fileId[0],
+                             fileId[1]);
 
   selectFileCmd[5] = fileId[0];
   selectFileCmd[6] = fileId[1];
@@ -793,8 +777,7 @@ bool StNdefNfcee::getFileContent(uint8_t fileId[2], uint32_t* len,
   res = transceive(sizeof(selectFileCmd), selectFileCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Select file failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Select file failed", __func__);
     return false;
   }
 
@@ -802,28 +785,26 @@ bool StNdefNfcee::getFileContent(uint8_t fileId[2], uint32_t* len,
   res = transceive(sizeof(readCmd), readCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Read file length failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Read file length failed", __func__);
     return false;
   }
 
   if (rspLen != 4) {
-    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
-        "%s; Read file length returned unexpected data", __func__);
+    LOG(ERROR) << StringPrintf("%s; Read file length returned unexpected data",
+                               __func__);
     return false;
   }
 
   remaining = (uint16_t)((rsp[0] << 8) | rsp[1]);
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; file length: 0x%x", __func__, remaining);
+  LOG(DEBUG) << StringPrintf("%s; file length: 0x%x", __func__, remaining);
 
   maxLen = getFileCapacity(fileId) - 2;
 
   if (maxLen < remaining) {
     // length information is wrong, read the whole buffer
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; length information is wrong, truncating", __func__);
+    LOG(DEBUG) << StringPrintf("%s; length information is wrong, truncating",
+                               __func__);
     remaining = maxLen;
   }
   *len = remaining;
@@ -841,8 +822,7 @@ bool StNdefNfcee::getFileContent(uint8_t fileId[2], uint32_t* len,
       res = transceive(sizeof(readCmd), readCmd, rspLen, rsp);
       if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
           (rsp[rspLen - 1] != 0x00)) {
-        DLOG_IF(ERROR, nfc_debug_enabled)
-            << StringPrintf("%s; Read file chunk failed", __func__);
+        LOG(ERROR) << StringPrintf("%s; Read file chunk failed", __func__);
         return false;
       }
 
@@ -877,13 +857,12 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool locked) {
     return false;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; set writable:%d for file %02hhx%02hhx", __func__,
-                      !locked, fileId[0], fileId[1]);
+  LOG(DEBUG) << StringPrintf("%s; set writable:%d for file %02hhx%02hhx",
+                             __func__, !locked, fileId[0], fileId[1]);
 
   if (mCCInfo[idx].wr_access == !locked) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; Already in requested state, exiting", __func__);
+    LOG(DEBUG) << StringPrintf("%s; Already in requested state, exiting",
+                               __func__);
     return true;
   }
 
@@ -891,8 +870,8 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool locked) {
   res = transceive(sizeof(selectCcCmd), selectCcCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Select Capability Container failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Select Capability Container failed",
+                               __func__);
     return false;
   }
 
@@ -903,8 +882,7 @@ bool StNdefNfcee::lockFile(uint8_t fileId[2], bool locked) {
       transceive(sizeof(updateBinaryByteCmd), updateBinaryByteCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Update write condition failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Update write condition failed", __func__);
     return false;
   }
 
@@ -930,9 +908,9 @@ bool StNdefNfcee::isLockedNdefData(uint8_t fileId[2]) {
     return false;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; FileId: 0x%02X%02X, NDEF write access: %d", __func__,
-                      fileId[0], fileId[1], mCCInfo[idx].wr_access);
+  LOG(DEBUG) << StringPrintf("%s; FileId: 0x%02X%02X, NDEF write access: %d",
+                             __func__, fileId[0], fileId[1],
+                             mCCInfo[idx].wr_access);
   return !mCCInfo[idx].wr_access;
 }
 
@@ -957,9 +935,8 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
   int offset;
   bool res;
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; FileId: 0x%02X%02X, writting length: 0x%X", __func__,
-                      fileId[0], fileId[1], buflen);
+  LOG(DEBUG) << StringPrintf("%s; FileId: 0x%02X%02X, writting length: 0x%X",
+                             __func__, fileId[0], fileId[1], buflen);
 
   if (idx == FILE_ID_NOT_FOUND) {
     return false;
@@ -967,22 +944,21 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
 
   /* can the new content fit in the file ? */
   if (buflen + 2 > mCCInfo[idx].size) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; file is too small for this content (%hd > %d)",
-                        __func__, buflen, mCCInfo[idx].size - 2);
+    LOG(ERROR) << StringPrintf(
+        "%s; file is too small for this content (%hd > %d)", __func__, buflen,
+        mCCInfo[idx].size - 2);
     return false;
   }
 
   if (isLockedNdefData(fileId)) {
-    DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
+    LOG(ERROR) << StringPrintf(
         "%s; File is not writable, please call lockFile() first", __func__);
     return false;
   }
 
   updateBinaryByteCmd = (uint8_t*)malloc(5 + mMlc);
   if (updateBinaryByteCmd == NULL) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; malloc error", __func__);
+    LOG(ERROR) << StringPrintf("%s; malloc error", __func__);
     return false;
   }
 
@@ -995,8 +971,7 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
   res = transceive(sizeof(selectFileCmd), selectFileCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Select target file failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Select target file failed", __func__);
     free(updateBinaryByteCmd);
     return false;
   }
@@ -1010,8 +985,7 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
   res = transceive(7, updateBinaryByteCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Write size 0 failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Write size 0 failed", __func__);
     free(updateBinaryByteCmd);
     return false;
   }
@@ -1032,8 +1006,7 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
     res = transceive(5 + thislen, updateBinaryByteCmd, rspLen, rsp);
     if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
         (rsp[rspLen - 1] != 0x00)) {
-      DLOG_IF(ERROR, nfc_debug_enabled)
-          << StringPrintf("%s; Write file chunk failed", __func__);
+      LOG(ERROR) << StringPrintf("%s; Write file chunk failed", __func__);
       free(updateBinaryByteCmd);
       return false;
     }
@@ -1051,8 +1024,7 @@ bool StNdefNfcee::writeFileContent(uint8_t fileId[2], uint16_t buflen,
   res = transceive(7, updateBinaryByteCmd, rspLen, rsp);
   if ((res == false) || (rsp[rspLen - 2] != 0x90) ||
       (rsp[rspLen - 1] != 0x00)) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Write final size failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Write final size failed", __func__);
     free(updateBinaryByteCmd);
     return false;
   }
@@ -1077,8 +1049,8 @@ bool StNdefNfcee::clearNdefData(uint8_t* fileId) {
   uint8_t* p;
   uint8_t idx;
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; FileId: 0x%02X%02X", __func__, fileId[0], fileId[1]);
+  LOG(DEBUG) << StringPrintf("%s; FileId: 0x%02X%02X", __func__, fileId[0],
+                             fileId[1]);
 
   idx = checkFileId(fileId);
 
@@ -1122,9 +1094,9 @@ uint32_t StNdefNfcee::getFileCapacity(uint8_t fileId[2]) {
   int idx = checkFileId(fileId);
 
   if (idx != FILE_ID_NOT_FOUND) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; FileId: 0x%02X%02X, max size: 0x%x", __func__,
-                        fileId[0], fileId[1], mCCInfo[idx].size);
+    LOG(DEBUG) << StringPrintf("%s; FileId: 0x%02X%02X, max size: 0x%x",
+                               __func__, fileId[0], fileId[1],
+                               mCCInfo[idx].size);
     return mCCInfo[idx].size;
   }
 
@@ -1143,8 +1115,7 @@ uint32_t StNdefNfcee::getFileCapacity(uint8_t fileId[2]) {
 *******************************************************************************/
 int StNdefNfcee::checkFileId(uint8_t fileId[2]) {
   if (mCCInfoCnt < 1) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Need to read CC Content first", __func__);
+    LOG(ERROR) << StringPrintf("%s; Need to read CC Content first", __func__);
     return FILE_ID_NOT_FOUND;
   }
 
@@ -1156,7 +1127,7 @@ int StNdefNfcee::checkFileId(uint8_t fileId[2]) {
     }
   }
 
-  DLOG_IF(ERROR, nfc_debug_enabled) << StringPrintf(
-      "%s; fileId 0x%02X%02X not found in CC", __func__, fileId[0], fileId[1]);
+  LOG(ERROR) << StringPrintf("%s; fileId 0x%02X%02X not found in CC", __func__,
+                             fileId[0], fileId[1]);
   return FILE_ID_NOT_FOUND;
 }

@@ -19,9 +19,11 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.SystemProperties;
 import android.util.Log;
+
 import com.android.nfcstm.NfcService;
 import com.android.nfcstm.dhimpl.NativeNfcStExtensions;
 import com.android.nfcstm.dhimpl.StNativeNfcManager;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -405,8 +407,8 @@ public class SecureElementSelector implements ISeController, NfcSimStateObserver
                 mSim2Presence = NfcSimStateObserver.STATE_PRESENT_READY;
                 Log.d(
                         TAG,
-                        "init() - persist.st_nfc_ignore_modem=1 ==> ignore all SIM state from modem "
-                                + "for certif");
+                        "init() - persist.st_nfc_ignore_modem=1 ==> ignore all SIM state from modem"
+                                + " for certif");
             } else if (SystemProperties.get("persist.st_nfc_ignore_modem_sim1").equals("1")) {
                 mSim1Presence = NfcSimStateObserver.STATE_ABSENT;
                 Log.d(TAG, "init() - persist.st_nfc_ignore_modem_sim1=1");

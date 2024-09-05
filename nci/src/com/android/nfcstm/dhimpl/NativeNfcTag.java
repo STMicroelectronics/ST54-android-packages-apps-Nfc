@@ -31,6 +31,7 @@ import android.nfc.tech.NfcV;
 import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
 import android.util.Log;
+
 import com.android.nfcstm.DeviceHost;
 import com.android.nfcstm.DeviceHost.TagEndpoint;
 
@@ -143,7 +144,7 @@ public class NativeNfcTag implements TagEndpoint {
             Log.d(TAG, "Tag lost, restarting polling loop");
             doDisconnect();
             if (tagDisconnectedCallback != null) {
-                tagDisconnectedCallback.onTagDisconnected(mConnectedHandle);
+                tagDisconnectedCallback.onTagDisconnected();
             }
             if (DBG) Log.d(TAG, "Stopping background presence check");
         }
@@ -920,5 +921,33 @@ public class NativeNfcTag implements TagEndpoint {
                 Log.d(TAG, "findNdef: Duplicate techIndex = " + techIndex);
             }
         }
+    }
+
+    @Override
+    public NdefMessage getNdef() {
+        Log.d(TAG, "getNdef: Searching for NfcCharging information");
+        int[] ndefinfo = new int[2];
+        int status;
+        NdefMessage ndefMsg = null;
+        status = checkNdefWithStatus(ndefinfo);
+        if (status != 0) {
+            Log.d(TAG, "Check NDEF Failed - status = " + status);
+            return ndefMsg;
+        }
+
+        byte[] buff = readNdef();
+        if (buff != null && buff.length > 0) {
+            try {
+                ndefMsg = new NdefMessage(buff);
+            } catch (FormatException e) {
+                // Create an intent anyway, without NDEF messages
+                ndefMsg = null;
+            }
+        } else if (buff != null) {
+            // Empty buffer, unformatted tags fall into this case
+            ndefMsg = null;
+        }
+
+        return ndefMsg;
     }
 }

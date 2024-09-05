@@ -19,8 +19,10 @@ package com.android.nfcstm.cardemulation;
 import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
+
 import com.android.nfcstm.NfcService;
 import com.android.nfcstm.cardemulation.RegisteredT3tIdentifiersCache.T3tIdentifier;
+
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
 import java.util.ArrayList;
@@ -29,7 +31,7 @@ import java.util.List;
 public class SystemCodeRoutingManager {
     static final String TAG = "SystemCodeRoutingManager";
 
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(true);
 
     final Object mLock = new Object();
 

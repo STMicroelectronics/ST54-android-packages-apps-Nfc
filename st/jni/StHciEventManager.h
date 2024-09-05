@@ -30,6 +30,8 @@ class StHciEventManager {
   static uint8_t sEsePipe;
   static uint8_t sSimPipe;
 
+  static uint8_t sMep1Pipe;
+  static uint8_t sMep2Pipe;
   static const int UICC2_PIPE_ID = 0x4E;
 
   StHciEventManager();

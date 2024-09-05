@@ -16,8 +16,8 @@
  */
 #pragma once
 #include <stdint.h>
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <log/log.h>
 
 int rawJniSeq(int i, uint8_t *inba, size_t inbasz, uint8_t *outba,
@@ -35,7 +35,7 @@ extern "C" int nfc_initiator_transceive_bits(void *pnd, const uint8_t *pbtTx,
                                              uint8_t *pbtRx, const size_t szRx,
                                              uint8_t *pbtRxPar);
 
-//#include <nfc/nfc-types.h>
+// #include <nfc/nfc-types.h>
 typedef struct __nt {
   struct __nti {
     struct __nai {
@@ -58,5 +58,4 @@ typedef struct {
 #define NFC_EOTHER -4
 #define NFC_ERFTRANS -5
 
-#define nfc_perror(r, ...) \
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("pERROR: " __VA_ARGS__)
+#define nfc_perror(r, ...) LOG(INFO) << StringPrintf("pERROR: " __VA_ARGS__)

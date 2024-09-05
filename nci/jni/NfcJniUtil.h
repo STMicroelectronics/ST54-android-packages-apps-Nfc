@@ -29,14 +29,7 @@
 #define DISCOVERY_MODE_DISABLED 0
 #define DISCOVERY_MODE_ENABLED 1
 
-#define MODE_P2P_TARGET 0
-#define MODE_P2P_INITIATOR 1
-
 /* Properties values */
-#define PROPERTY_LLCP_LTO 0
-#define PROPERTY_LLCP_MIU 1
-#define PROPERTY_LLCP_WKS 2
-#define PROPERTY_LLCP_OPT 3
 #define PROPERTY_NFC_DISCOVERY_A 4
 #define PROPERTY_NFC_DISCOVERY_B 5
 #define PROPERTY_NFC_DISCOVERY_F 6
@@ -84,6 +77,20 @@
 #define NFCSTATUS_SUCCESS (0x0000)
 #define NFCSTATUS_FAILED (0x00FF)
 
+/* Pre-defined route type values. These must match the values in
+ * RoutingManager.cpp.
+ */
+#define ROUTE_TYPE_TECH 0x01
+#define ROUTE_TYPE_PROTO 0x02
+#define ROUTE_TYPE_AID 0x04
+
+#define ROUTE_SWITCH_ON 0x01
+#define ROUTE_SWITCH_OFF 0x02
+#define ROUTE_BATTERY_OFF 0x04
+#define ROUTE_SCREEN_OFF_UNLOCKED 0x08
+#define ROUTE_SCREEN_ON_LOCKED 0x10
+#define ROUTE_SCREEN_OFF_LOCKED 0x20
+
 struct nfc_jni_native_data {
   /* Thread handle */
   pthread_t thread;
@@ -98,16 +105,9 @@ struct nfc_jni_native_data {
 
   /* Cached objects */
   jobject cached_NfcTag;
-  jobject cached_P2pDevice;
 
   /* Secure Element selected */
   int seId;
-
-  /* LLCP params */
-  int lto;
-  int miu;
-  int wks;
-  int opt;
 
   int tech_mask;
   int discovery_duration;
@@ -142,8 +142,4 @@ int nfc_jni_get_nfc_socket_handle(JNIEnv* e, jobject o);
 struct nfc_jni_native_data* nfc_jni_get_nat(JNIEnv* e, jobject o);
 int register_com_android_nfc_NativeNfcManager(JNIEnv* e);
 int register_com_android_nfc_NativeNfcTag(JNIEnv* e);
-int register_com_android_nfc_NativeP2pDevice(JNIEnv* e);
-int register_com_android_nfc_NativeLlcpConnectionlessSocket(JNIEnv* e);
-int register_com_android_nfc_NativeLlcpServiceSocket(JNIEnv* e);
-int register_com_android_nfc_NativeLlcpSocket(JNIEnv* e);
 }  // namespace android

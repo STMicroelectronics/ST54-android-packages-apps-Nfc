@@ -13,18 +13,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.nfcstm.cardemulation;
 
 import android.content.ComponentName;
 import android.content.Context;
 import android.nfc.cardemulation.NfcFServiceInfo;
+import android.os.ParcelFileDescriptor;
 import android.os.UserHandle;
 import android.os.UserManager;
 import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.proto.ProtoOutputStream;
+
+import androidx.annotation.VisibleForTesting;
+
 import java.io.FileDescriptor;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -35,7 +39,7 @@ import java.util.Map;
 public class RegisteredT3tIdentifiersCache {
     static final String TAG = "RegisteredT3tIdentifiersCache";
 
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(true);
 
     // All NFC-F services that have registered
     final Map<Integer, List<NfcFServiceInfo>> mUserNfcFServiceInfo =
@@ -86,9 +90,14 @@ public class RegisteredT3tIdentifiersCache {
     boolean mNfcEnabled = false;
 
     public RegisteredT3tIdentifiersCache(Context context) {
+        this(context, new SystemCodeRoutingManager());
+    }
+
+    @VisibleForTesting
+    RegisteredT3tIdentifiersCache(Context context, SystemCodeRoutingManager routingManager) {
         Log.d(TAG, "RegisteredT3tIdentifiersCache");
         mContext = context;
-        mRoutingManager = new SystemCodeRoutingManager();
+        mRoutingManager = routingManager;
     }
 
     public NfcFServiceInfo resolveNfcid2(String nfcid2) {
@@ -110,7 +119,7 @@ public class RegisteredT3tIdentifiersCache {
 
     private int getProfileParentId(int userId) {
         UserManager um =
-                mContext.createContextAsUser(UserHandle.of(userId), /*flags=*/ 0)
+                mContext.createContextAsUser(UserHandle.of(userId), /* flags= */ 0)
                         .getSystemService(UserManager.class);
         UserHandle uh = um.getProfileParent(UserHandle.of(userId));
         return uh == null ? userId : uh.getIdentifier();
@@ -135,7 +144,8 @@ public class RegisteredT3tIdentifiersCache {
         if (DBG) {
             Log.d(
                     TAG,
-                    "generateForegroundT3tIdentifiersCacheLocked() - mForegroundT3tIdentifiersCache: size="
+                    "generateForegroundT3tIdentifiersCacheLocked() -"
+                            + " mForegroundT3tIdentifiersCache: size="
                             + mForegroundT3tIdentifiersCache.size());
             for (Map.Entry<String, NfcFServiceInfo> entry :
                     mForegroundT3tIdentifiersCache.entrySet()) {
@@ -244,14 +254,22 @@ public class RegisteredT3tIdentifiersCache {
 
     public void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
         pw.println("T3T Identifier cache entries: ");
-        for (Map.Entry<String, NfcFServiceInfo> entry : mForegroundT3tIdentifiersCache.entrySet()) {
-            pw.println("    NFCID2: " + entry.getKey());
-            pw.println("    NfcFServiceInfo: ");
-            entry.getValue().dump(fd, pw, args);
+        ParcelFileDescriptor pFd;
+        try {
+            pFd = ParcelFileDescriptor.dup(fd);
+            for (Map.Entry<String, NfcFServiceInfo> entry :
+                    mForegroundT3tIdentifiersCache.entrySet()) {
+                pw.println("    NFCID2: " + entry.getKey());
+                pw.println("    NfcFServiceInfo: ");
+                entry.getValue().dump(pFd, pw, args);
+            }
+            pw.println("");
+            mRoutingManager.dump(fd, pw, args);
+            pw.println("");
+            pFd.close();
+        } catch (IOException e) {
+            pw.println("Failed to dump T3T idenitifier cache entries: " + e);
         }
-        pw.println("");
-        mRoutingManager.dump(fd, pw, args);
-        pw.println("");
     }
 
     /**

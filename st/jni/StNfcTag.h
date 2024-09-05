@@ -179,28 +179,6 @@ class NfcTag {
 
   /*******************************************************************************
   **
-  ** Function:        isP2pDiscovered
-  **
-  ** Description:     Does the peer support P2P?
-  **
-  ** Returns:         True if the peer supports P2P.
-  **
-  *******************************************************************************/
-  bool isP2pDiscovered();
-
-  /*******************************************************************************
-  **
-  ** Function:        selectP2p
-  **
-  ** Description:     Select the preferred P2P technology if there is a choice.
-  **
-  ** Returns:         None
-  **
-  *******************************************************************************/
-  void selectP2p();
-
-  /*******************************************************************************
-  **
   ** Function:        selectFirstTag
   **
   ** Description:     When multiple tags are discovered, just select the first
@@ -459,8 +437,6 @@ class NfcTag {
 
   void setReselect(bool isReselecting);
 
-  bool getP2pDetectedButPausedStatus();
-
   void enableSkipMifareInterface();
 
   void isSkipMifare(bool status);
@@ -500,7 +476,6 @@ class NfcTag {
   bool mIsDynamicTagId;  // whether the tag has dynamic tag ID
   tNFA_RW_PRES_CHK_OPTION mPresenceCheckAlgorithm;
   bool mIsFelicaLite;
-  bool mIsP2pDetectedButPaused;
   bool mIsSkipMifare;
   NfcStatsUtil* mNfcStatsUtil;
 

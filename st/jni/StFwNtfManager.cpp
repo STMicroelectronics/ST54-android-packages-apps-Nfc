@@ -16,8 +16,8 @@
  *  Provide extensions for the ST implementation of the NFC stack
  */
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include <nativehelper/ScopedPrimitiveArray.h>
 #include <cutils/properties.h>
@@ -41,7 +41,6 @@ extern bool isDiscoveryStarted();
  **
  *****************************************************************************/
 using android::base::StringPrintf;
-extern bool nfc_debug_enabled;
 
 typedef void* (*THREADFUNCPTR)(void*);
 
@@ -168,7 +167,7 @@ StFwNtfManager& StFwNtfManager::getInstance() {
 int StFwNtfManager::fwTsDiffToMs(uint8_t format, uint32_t fwtsstart,
                                  uint32_t fwtsend) {
   uint32_t diff;
-  float factor = 128 / 28000;  // ST21NFCD, ST54J/K: 4.57us
+  float factor = 128.0 / 28000;  // ST21NFCD, ST54J/K: 4.57us
   if (fwtsstart <= fwtsend) {
     diff = fwtsend - fwtsstart;
   } else {
@@ -176,10 +175,10 @@ int StFwNtfManager::fwTsDiffToMs(uint8_t format, uint32_t fwtsstart,
     diff = (0xFFFFFFFF - fwtsstart) + fwtsend;
   }
   if ((format & 0x30) == 0x30) {
-    // ST54L: 3.84us
-    factor = 256 / 66666;
+    // ST54L: 3.95us on average
+    factor = 256.0 / 64750;
   }
-  return (int)((float)diff * factor);
+  return (int)(((float)diff) * factor);
 }
 
 /*******************************************************************************
@@ -196,7 +195,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
   static const char fn[] = "StFwNtfManager::handleLogDataDynParams";
 
   if ((format & 0x1) == 0 || data_len < 6) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; TLV without timestamp";
+    LOG(INFO) << fn << "; TLV without timestamp";
     return;
   }
 
@@ -213,12 +212,12 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
         mDynFwTsT1Started = receivedFwts;
         mDynFwState = DYN_ST_T1_RUNNING;
         mDynFwSubState = DYN_SST_IDLE;
-        LOG_IF(INFO, nfc_debug_enabled) << fn << "; Start T1";
+        LOG(INFO) << fn << "; Start T1";
       }
     } break;
 
     case (DYN_ST_T1_IN_ROTATION):
-      FALLTHROUGH;
+      FALLTHROUGH_INTENDED;
     case (DYN_ST_T1_RUNNING): {
       switch (mDynFwSubState) {
         case (DYN_SST_IDLE):
@@ -228,7 +227,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
               if ((p_data[3] == 0x01) || (p_data[3] == 0x02)) {
                 // Go to DYN_SST_STARTED
                 mDynFwSubState = DYN_SST_STARTED;
-                LOG_IF(INFO, nfc_debug_enabled) << fn << "; -> SST_STARTED";
+                LOG(INFO) << fn << "; -> SST_STARTED";
               }
               break;
           }
@@ -249,7 +248,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
                 }
                 if (fw_cur_set !=
                     NfcStExtensions::getInstance().sRfDynParamSet) {
-                  LOG_IF(INFO, nfc_debug_enabled)
+                  LOG(INFO)
                       << fn
                       << StringPrintf("; Firmware switched dynamic params %d",
                                       mDynRotatedByFw);
@@ -264,8 +263,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
 
             case T_fieldLevel: {
               if (mDynFwState != DYN_ST_T1_IN_ROTATION) mDynFwErr++;
-              LOG_IF(INFO, nfc_debug_enabled)
-                  << fn << "; -> SST_IDLE, err=" << mDynFwErr;
+              LOG(INFO) << fn << "; -> SST_IDLE, err=" << mDynFwErr;
               mDynFwSubState = DYN_SST_IDLE;
             } break;
 
@@ -275,8 +273,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
               if ((p_data[3] == 0x01) || (p_data[3] == 0x02)) {
                 // Stay in DYN_SST_STARTED, incr err
                 if (mDynFwState != DYN_ST_T1_IN_ROTATION) mDynFwErr++;
-                LOG_IF(INFO, nfc_debug_enabled)
-                    << fn << "; -> DYN_SST_STARTED, err=" << mDynFwErr;
+                LOG(INFO) << fn << "; -> DYN_SST_STARTED, err=" << mDynFwErr;
               }
               break;
 
@@ -304,7 +301,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
             }
               // fallback to CERx case if there was no error status.
               // (observer mode)
-              FALLTHROUGH;
+              FALLTHROUGH_INTENDED;
             case T_CERx: {
               // if length is 0, ignore
               if (!reallen) {
@@ -328,8 +325,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
               }
               // otherwise we have received valid data, stop the algorithm.
               if (mDynFwState != DYN_ST_T1_IN_ROTATION) {
-                LOG_IF(INFO, nfc_debug_enabled)
-                    << fn << "; Received data, stop T1";
+                LOG(INFO) << fn << "; Received data, stop T1";
                 mDynFwState = DYN_ST_ACTIVE;
                 mDynFwTsT1Started = 0;
               }
@@ -345,7 +341,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
 
     case (DYN_ST_T1_ROTATION_DONE): {
       // The task to rotate parameter was completed, resume T1
-      LOG_IF(INFO, nfc_debug_enabled) << fn << "; T1 restarted";
+      LOG(INFO) << fn << "; T1 restarted";
       mDynFwTsT1Started = receivedFwts;
       mDynFwState = DYN_ST_T1_RUNNING;
     } break;
@@ -356,7 +352,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
     if (fwTsDiffToMs(format, mDynFwTsT1Started, receivedFwts) >
         NfcStExtensions::getInstance().mDynT1Threshold) {
       // T1 elapsed
-      LOG_IF(INFO, nfc_debug_enabled) << fn << "; T1 elapsed";
+      LOG(INFO) << fn << "; T1 elapsed";
       // restart T1, using the ts of the last event of this ntf is fine.
       mDynFwTsT1Started = receivedFwts;
       // rotate if too many errors received.
@@ -376,8 +372,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
           // send ntf to service about rotating parameters
           matchSendTriggerPayload(0x00, buf, sizeof(buf));
         }
-        LOG_IF(INFO, nfc_debug_enabled)
-            << fn << "; Start task to rotate params";
+        LOG(INFO) << fn << "; Start task to rotate params";
         mDynFwTsT1Started = 0;
         mDynFwState = DYN_ST_T1_IN_ROTATION;
         (void)pthread_create(
@@ -393,7 +388,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
     if (last && (fwTsDiffToMs(format, mDynFwTsT2Started, receivedFwts) >
                  mDynT2Threshold)) {
       // T2 elapsed
-      LOG_IF(INFO, nfc_debug_enabled) << fn << "; T2 elapsed";
+      LOG(INFO) << fn << "; T2 elapsed";
       mDynFwState = DYN_ST_INITIAL;
       mDynFwTsT1Started = 0;
       mDynFwTsT2Started = 0;
@@ -404,7 +399,7 @@ void StFwNtfManager::handleLogDataDynParams(uint8_t format, uint16_t data_len,
         mDynRotated = 0;
         (void)pthread_attr_init(&pa);
         (void)pthread_attr_setdetachstate(&pa, PTHREAD_CREATE_DETACHED);
-        LOG_IF(INFO, nfc_debug_enabled) << fn << "; Start task to reset params";
+        LOG(INFO) << fn << "; Start task to reset params";
         (void)pthread_create(
             &p, &pa, (THREADFUNCPTR)&NfcStExtensions::rotateRfParameters,
             (void*)true);
@@ -436,10 +431,9 @@ void StFwNtfManager::matchSendTriggerPayload(uint8_t nfcee, uint8_t* buf,
   static const char fn[] = "StFwNtfManager::StMatchSelectSw::SendTrigger";
   JNIEnv* e = NULL;
   ScopedAttach attach(mNativeData->vm, &e);
-  LOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; send (%x) %db: %02x%02x...", nfcee, len, buf[0],
-                      buf[1]);
+  LOG(INFO) << fn
+            << StringPrintf("; send (%x) %db: %02x%02x...", nfcee, len, buf[0],
+                            buf[1]);
   if (e == NULL) {
     LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
     return;
@@ -468,22 +462,21 @@ void StFwNtfManager::matchStoreActionAid(uint8_t nfcee, uint8_t* aid, int len) {
   if (mMatchSelectedCurrent >= MATCH_SEL_QUEUE_LEN) {
     matchPurgeActionAid(1, false);
   }
-  LOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; store (%x) %db: %02x%02x...%02x", nfcee, len,
-                      (len > 0) ? aid[0] : 0, (len > 1) ? aid[1] : 0,
-                      (len > 0) ? aid[len - 1] : 0);
+  LOG(INFO) << fn
+            << StringPrintf("; store (%x) %db: %02x%02x...%02x", nfcee, len,
+                            (len > 0) ? aid[0] : 0, (len > 1) ? aid[1] : 0,
+                            (len > 0) ? aid[len - 1] : 0);
   if (len) memcpy(&mMatchSelectedAid[16 * mMatchSelectedCurrent], aid, len);
   mMatchSelectedAidLen[mMatchSelectedCurrent] = len;
   mMatchSelectedAidNfcee[mMatchSelectedCurrent] = nfcee;
   mMatchSelectedCurrent++;
-  LOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; mMatchSelectedCurrent=%d", mMatchSelectedCurrent);
+  LOG(INFO) << fn
+            << StringPrintf("; mMatchSelectedCurrent=%d",
+                            mMatchSelectedCurrent);
   if (mMatchSelectPartialCurrent > 0) {
     // retry now.
-    LOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; check if we had received it in logs already");
+    LOG(INFO) << fn
+              << StringPrintf("; check if we had received it in logs already");
     matchGotLogSw(true, 0, 0);
   }
 }
@@ -502,20 +495,21 @@ void StFwNtfManager::matchGotLogPartialAid(uint8_t* aidBeg, int aidBegLen,
                                            int fullLen) {
   static const char fn[] = "StFwNtfManager::StMatchSelectSw::StorePartialAid";
   SyncEventGuard guard(mMatchSelectLock);
-  LOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf(
-             "; Matched SELECT, [%d] %d(%d)b: %02x%02x...%02x%02x",
-             mMatchSelectPartialCurrent, fullLen, aidBegLen + aidEndLen,
-             (aidBegLen > 0) ? aidBeg[0] : 0, (aidBegLen > 1) ? aidBeg[1] : 0,
-             (aidEndLen > 0) ? aidEnd[0] : 0, (aidEndLen > 1) ? aidEnd[1] : 0);
+  LOG(INFO) << fn
+            << StringPrintf(
+                   "; Matched SELECT, [%d] %d(%d)b: %02x%02x...%02x%02x",
+                   mMatchSelectPartialCurrent, fullLen, aidBegLen + aidEndLen,
+                   (aidBegLen > 0) ? aidBeg[0] : 0,
+                   (aidBegLen > 1) ? aidBeg[1] : 0,
+                   (aidEndLen > 0) ? aidEnd[0] : 0,
+                   (aidEndLen > 1) ? aidEnd[1] : 0);
   while (mMatchSelectPartialCurrent >= MATCH_SEL_QUEUE_LEN) {
     int i;
     // Rotate FW logs, discard the oldest one.
     // at most we have entries 0, 1 , ..., MATCH_SEL_QUEUE_LEN - 2 at the end in
     // the tables with value mMatchSelectPartialCurrent == MATCH_SEL_QUEUE_LEN -
     // 1, which means we are storing at that index.
-    LOG_IF(INFO, nfc_debug_enabled)
+    LOG(INFO)
         << fn
         << StringPrintf(
                "; discard old FW log, %d(%d)b: %02x%02x...%02x%02x SW "
@@ -571,10 +565,10 @@ void StFwNtfManager::matchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2) {
   int i, j;
 
   if (!rematch) {
-    LOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; Got SW %02x%02x, mMatchSelectPartialCurrent=%d", sw1,
-                        sw2, mMatchSelectPartialCurrent);
+    LOG(INFO) << fn
+              << StringPrintf(
+                     "; Got SW %02x%02x, mMatchSelectPartialCurrent=%d", sw1,
+                     sw2, mMatchSelectPartialCurrent);
     // store the SW in the table
     mMatchSelectPartialSw[2 * mMatchSelectPartialCurrent] = sw1;
     mMatchSelectPartialSw[2 * mMatchSelectPartialCurrent + 1] = sw2;
@@ -605,8 +599,7 @@ void StFwNtfManager::matchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2) {
                    &mMatchSelectPartialAid[16 * j +
                                            mMatchSelectPartialAidBegLen[j]],
                    mMatchSelectPartialAidEndLen[j]))) {
-        LOG_IF(INFO, nfc_debug_enabled)
-            << fn << StringPrintf("; matched=#%d-%d", i, j);
+        LOG(INFO) << fn << StringPrintf("; matched=#%d-%d", i, j);
         break;
       }
     }
@@ -630,7 +623,7 @@ void StFwNtfManager::matchGotLogSw(bool rematch, uint8_t sw1, uint8_t sw2) {
     // discard all FW logs entries 0..j, so j+1..MAX is moved.
     for (i = 0; i < MATCH_SEL_QUEUE_LEN; i++) {
       if (i < j + 1) {
-        LOG_IF(INFO, nfc_debug_enabled)
+        LOG(INFO)
             << fn
             << StringPrintf(
                    "; discard old FW log(%d), %d(%d)b: %02x%02x...%02x%02x SW "
@@ -698,10 +691,9 @@ void StFwNtfManager::matchPurgeActionAid(int num, bool skipLast) {
     memcpy(&mMatchSelectedAid[16 * j], &mMatchSelectedAid[16 * (i + j)], 16);
   }
   mMatchSelectedCurrent = j;
-  LOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; purged %d(real:%d) remains %d", num, i,
-                      mMatchSelectedCurrent);
+  LOG(INFO) << fn
+            << StringPrintf("; purged %d(real:%d) remains %d", num, i,
+                            mMatchSelectedCurrent);
 }
 
 /*******************************************************************************
@@ -717,7 +709,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
                                    uint8_t* p_data, bool last) {
   static const char fn[] = "StFwNtfManager::matchSelectSw";
   if (data_len < 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; Size too small";
+    LOG(INFO) << fn << "; Size too small";
     return;
   }
   uint8_t t = p_data[0];
@@ -725,7 +717,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
   uint32_t receivedFwts = 0;
   int offset = ((format & 0x30) == 0x10) ? 4 : 5;  // ST21D : 54J/L
   if (l != data_len - 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; Sizes mismatch";
+    LOG(INFO) << fn << "; Sizes mismatch";
     return;
   }
   if (format & 0x01) {
@@ -735,8 +727,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
     data_len -= 4;
     l -= 4;
   }
-  LOG_IF(INFO, nfc_debug_enabled)
-      << fn << StringPrintf("; processing t:%02x l:%d", t, l);
+  LOG(INFO) << fn << StringPrintf("; processing t:%02x l:%d", t, l);
   // from here we assume frame length is correct because data is consistent
   switch (mMatchSelectState) {
     case MATCH_SEL_ST_INITIAL: {
@@ -749,19 +740,17 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
           break;
         case T_firstRx:
           mMatchSelectState = MATCH_SEL_ST_GOT_1stRX;
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << "; mMatchSelectState = MATCH_SEL_ST_GOT_1stRX";
+          LOG(INFO) << fn << "; mMatchSelectState = MATCH_SEL_ST_GOT_1stRX";
       };
     } break;
     case MATCH_SEL_ST_GOT_1stRX: {
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          FALLTHROUGH;
+          FALLTHROUGH_INTENDED;
         case T_fieldLevel:
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
+          LOG(INFO) << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
           break;
         case T_CERxError: {
           if (data_len <= offset) return;
@@ -773,51 +762,49 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
         }
           // fallback to T_CERx case if there was no error status.
           offset++;
-          FALLTHROUGH;
+          FALLTHROUGH_INTENDED;
         case T_CERx: {
           // Check if we go to ISO-DEP or not
           switch (p_data[2] & 0xF) {
             case 0x7: {  // B standard frame.
-              LOG_IF(INFO, nfc_debug_enabled) << fn << "; Rx type B";
+              LOG(INFO) << fn << "; Rx type B";
               // SENSB_REQ/ALLB_REQ
               if ((p_data[offset + 2] == 0x05) &&
                   (p_data[offset + 3] == 0x00)) {
-                LOG_IF(INFO, nfc_debug_enabled) << fn << "; SENSB_REQ/ALLB_REQ";
+                LOG(INFO) << fn << "; SENSB_REQ/ALLB_REQ";
                 return;
               }
               // SLEEPB_REQ
               if (p_data[offset + 2] == 0x50) {
-                LOG_IF(INFO, nfc_debug_enabled) << fn << "; SLEEPB_REQ";
+                LOG(INFO) << fn << "; SLEEPB_REQ";
                 return;
               }
               // ATTRIB
               if (p_data[offset + 2] == 0x1d) {
-                LOG_IF(INFO, nfc_debug_enabled)
-                    << fn << "; mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP";
+                LOG(INFO) << fn
+                          << "; mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP";
                 mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP;
                 return;
               }
               // other messages are unexpected (deselect, prop protocols)
-              LOG_IF(INFO, nfc_debug_enabled)
-                  << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
+              LOG(INFO) << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
               mMatchSelectState = MATCH_SEL_ST_INITIAL;
             } break;
             case 0x3: {  // A standard frame.
               // SLP_REQ
               if (p_data[offset + 2] == 0x50) {
-                LOG_IF(INFO, nfc_debug_enabled) << fn << "; SLP_REQ";
+                LOG(INFO) << fn << "; SLP_REQ";
                 return;
               }
               // RATS
               if (p_data[offset + 2] == 0xE0) {
-                LOG_IF(INFO, nfc_debug_enabled)
-                    << fn << "; mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP";
+                LOG(INFO) << fn
+                          << "; mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP";
                 mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP;
                 return;
               }
               // other messages are unexpected
-              LOG_IF(INFO, nfc_debug_enabled)
-                  << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
+              LOG(INFO) << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
               mMatchSelectState = MATCH_SEL_ST_INITIAL;
             } break;
           }
@@ -831,10 +818,9 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          FALLTHROUGH;
+          FALLTHROUGH_INTENDED;
         case T_fieldLevel:
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
+          LOG(INFO) << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
           break;
         case T_CERxError: {
@@ -847,11 +833,10 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
         }
           // fallback to T_CERx case if there was no error status.
           offset++;
-          FALLTHROUGH;
+          FALLTHROUGH_INTENDED;
         case T_CERx: {
           realLen = p_data[offset] << 8 | p_data[offset + 1];
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf("; realLen=%d", realLen);
+          LOG(INFO) << fn << StringPrintf("; realLen=%d", realLen);
           offset += 2;
           realLenDataStart = offset;
           SoD = p_data[offset];
@@ -863,8 +848,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
           offset++;                 // skip the SoD
           if (SoD & 0x4) offset++;  // skip NAD
           if (SoD & 0x8) offset++;  // skip DID
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf("; INS=0x%02hhx", p_data[offset + 1]);
+          LOG(INFO) << fn << StringPrintf("; INS=0x%02hhx", p_data[offset + 1]);
           // Are we receiving a SELECT ?
           if (p_data[offset + 1] == 0xA4) {
             // offset+4 = Lc, then payload and tail (until data_len)
@@ -875,10 +859,10 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
 
             // filter some invalid APDUs
             if ((tailLen > 1) || (realAidLen > 16)) {
-              LOG_IF(INFO, nfc_debug_enabled)
-                  << fn
-                  << StringPrintf("; tailLen=0x%02hhx realAidLen=0x%02hhx skip",
-                                  tailLen, realAidLen);
+              LOG(INFO) << fn
+                        << StringPrintf(
+                               "; tailLen=0x%02hhx realAidLen=0x%02hhx skip",
+                               tailLen, realAidLen);
               return;
             }
             if (realAidLenStart + realAidLen + tailLen > data_len) {
@@ -893,8 +877,8 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
                                     p_data[offset + 4]);
             }
             mMatchSelectState = MATCH_SEL_ST_CE_GOT_SELECT;
-            LOG_IF(INFO, nfc_debug_enabled)
-                << fn << "; mMatchSelectState = MATCH_SEL_ST_CE_GOT_SELECT";
+            LOG(INFO) << fn
+                      << "; mMatchSelectState = MATCH_SEL_ST_CE_GOT_SELECT";
           }
         } break;
       }
@@ -905,17 +889,15 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
       switch (t) {
         case T_fieldOff:
           mMatchSelectLastFieldOffTs = receivedFwts;
-          FALLTHROUGH;
+          FALLTHROUGH_INTENDED;
         case T_fieldLevel:
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
+          LOG(INFO) << fn << "; mMatchSelectState = MATCH_SEL_ST_INITIAL";
           mMatchSelectState = MATCH_SEL_ST_INITIAL;
           break;
 
         case T_RxI: {
           realLen = p_data[3];
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf("; realLen=%d", realLen);
+          LOG(INFO) << fn << StringPrintf("; realLen=%d", realLen);
           offset = 5;  // HCI packet header
           bool has_cb = (p_data[offset] & 0x80) == 0x80;
           uint8_t pid = p_data[offset] & 0x7F;
@@ -932,7 +914,7 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
               // bytes.
               if (offset + 1 == data_len) {
                 SyncEventGuard guard(mMatchSelectLock);
-                LOG_IF(INFO, nfc_debug_enabled) << fn << "; split SW";
+                LOG(INFO) << fn << "; split SW";
                 sw1 = mMatchSelectPartialLastChainedByte;
                 sw2 = p_data[offset];
               } else {
@@ -941,8 +923,8 @@ void StFwNtfManager::matchSelectSw(uint8_t format, uint16_t data_len,
               }
               matchGotLogSw(false, sw1, sw2);
               mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP;
-              LOG_IF(INFO, nfc_debug_enabled)
-                  << fn << "; mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP";
+              LOG(INFO) << fn
+                        << "; mMatchSelectState = MATCH_SEL_ST_CE_IN_ISODEP";
             }
           }
         } break;
@@ -973,13 +955,13 @@ void StFwNtfManager::monitorSeActivation(uint8_t format, uint16_t data_len,
                                          uint8_t* p_data, bool last) {
   static const char fn[] = "StFwNtfManager::monitorSeActivation";
   if (data_len < 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; Size too small";
+    LOG(INFO) << fn << "; Size too small";
     return;
   }
   uint8_t t = p_data[0];
   uint8_t l = p_data[1];
   if (l != data_len - 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; Sizes mismatch";
+    LOG(INFO) << fn << "; Sizes mismatch";
     return;
   }
   if (format & 0x01) {
@@ -1003,7 +985,7 @@ void StFwNtfManager::monitorSeActivation(uint8_t format, uint16_t data_len,
       // We check if we receive a CLEAR_ALL_PIPES from the eSE.
       // TT LL SS RL II 81 14 SY NC
       if (data_len == 9 && p_data[5] == 0x81 && p_data[6] == 0x14) {
-        DLOG_IF(INFO, nfc_debug_enabled) << fn << "; Got CLEAR_ALL_PIPES";
+        LOG(DEBUG) << fn << "; Got CLEAR_ALL_PIPES";
         mStMonitorSeActivationState = STMONITORSTATE_GOT_CLEAR_ALL_PIPES;
       }
       break;
@@ -1012,7 +994,7 @@ void StFwNtfManager::monitorSeActivation(uint8_t format, uint16_t data_len,
       // We check if we receive a ANY_SET_PARAM on Card A.
       // TT LL SS RL II A3 01 xxxx
       if (data_len >= 8 && p_data[5] == 0xA3 && p_data[6] == 0x01) {
-        DLOG_IF(INFO, nfc_debug_enabled) << fn << "; Got a param on card A";
+        LOG(DEBUG) << fn << "; Got a param on card A";
         mStMonitorSeActivationState = STMONITORSTATE_GOT_PARAM_A;
       }
       break;
@@ -1022,8 +1004,7 @@ void StFwNtfManager::monitorSeActivation(uint8_t format, uint16_t data_len,
       // TT LL SS RL II A3 01 01 02
       if (data_len == 9 && p_data[5] == 0xA3 && p_data[6] == 0x01 &&
           p_data[7] == 0x01 && p_data[8] == 0x02) {
-        DLOG_IF(INFO, nfc_debug_enabled)
-            << fn << "; Got MODE[02], activation success";
+        LOG(DEBUG) << fn << "; Got MODE[02], activation success";
         mStMonitorSeActivationState = STMONITORSTATE_INITIAL;
         break;
       }
@@ -1061,8 +1042,9 @@ void StFwNtfManager::eseMonitor(uint8_t format, uint16_t data_len,
     // SWP deactivated, we clear our state
     mLastSentCounter = 0;
     mLastSentLen = 0;
-    LOG_IF(INFO, nfc_debug_enabled && mLastReceivedParamLen)
-        << fn << "; clear saved param on deact";
+    if (mLastReceivedParamLen) {
+      LOG(INFO) << fn << "; clear saved param on deact";
+    }
     mLastReceivedParamLen = 0;
     mLastReceivedIsFrag[0] = false;
     mLastReceivedIsFrag[1] = false;
@@ -1128,13 +1110,12 @@ void StFwNtfManager::eseMonitor(uint8_t format, uint16_t data_len,
                  newParamLen < (int)sizeof(mLastReceivedParam)
                      ? newParamLen
                      : sizeof(mLastReceivedParam));
-          LOG_IF(INFO, nfc_debug_enabled)
-              << fn << StringPrintf("; saved param: %02hhx", p_data[7]);
+          LOG(INFO) << fn << StringPrintf("; saved param: %02hhx", p_data[7]);
         }
       } else {
         // we received an I-frame but it is not ANY-SET-PARAM
         if (is_first_frag && (mLastReceivedParamLen != 0)) {
-          LOG_IF(INFO, nfc_debug_enabled) << fn << "; clear saved param";
+          LOG(INFO) << fn << "; clear saved param";
           mLastReceivedParamLen = 0;
         }
       }
@@ -1175,7 +1156,7 @@ void StFwNtfManager::send1stRxAndRfParam(uint8_t format, uint16_t data_len,
                                          uint8_t* p_data, bool last) {
   static const char fn[] = "StFwNtfManager::send1stRxAndRfParam";
   if (data_len < 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; Size too small";
+    LOG(INFO) << fn << "; Size too small";
     return;
   }
   uint8_t t = p_data[0];
@@ -1269,8 +1250,7 @@ void StFwNtfManager::clfFieldMonitor(uint8_t format, uint16_t data_len,
     if ((mStClfFieldMonitorInRemoteFieldPrev == false) &&
         (mStClfFieldMonitorInRemoteField == true)) {
       // Create the worker thread
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << __func__ << "; clfFieldMonitorWorker : create";
+      LOG(DEBUG) << __func__ << "; clfFieldMonitorWorker : create";
       ret = pthread_create(
           &mStClfFieldMonitorThread, NULL,
           (THREADFUNCPTR)&StFwNtfManager::clfFieldMonitorWorker, (void*)this);
@@ -1288,8 +1268,7 @@ void StFwNtfManager::clfFieldMonitor(uint8_t format, uint16_t data_len,
       mStClfFieldMonitorSync.end();
       if (mStClfFieldMonitorThread != (pthread_t)NULL) {
         void* r;
-        DLOG_IF(INFO, nfc_debug_enabled)
-            << __func__ << "; clfFieldMonitorWorker : join";
+        LOG(DEBUG) << __func__ << "; clfFieldMonitorWorker : join";
         ret = pthread_join(mStClfFieldMonitorThread, &r);
         if (ret != 0) {
           LOG(ERROR) << StringPrintf(
@@ -1297,8 +1276,7 @@ void StFwNtfManager::clfFieldMonitor(uint8_t format, uint16_t data_len,
         }
         mStClfFieldMonitorThread = (pthread_t)NULL;
       } else {
-        DLOG_IF(INFO, nfc_debug_enabled)
-            << __func__ << "; clfFieldMonitorWorker : no join needed";
+        LOG(DEBUG) << __func__ << "; clfFieldMonitorWorker : no join needed";
       }
 
     } else if (mStClfFieldMonitorInRemoteField == true) {
@@ -1326,8 +1304,7 @@ void* StFwNtfManager::clfFieldMonitorWorker(StFwNtfManager* inst) {
   // JNIEnv* e = NULL;
   // ScopedAttach attach(inst->mNativeData->vm, &e);
   inst->mStClfFieldMonitorSync.start();
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << __func__ << "; clfFieldMonitorWorker : started";
+  LOG(DEBUG) << __func__ << "; clfFieldMonitorWorker : started";
   if (inst->mStClfFieldMonitorInRemoteField == false) {
     timeout = false;
   } else
@@ -1340,8 +1317,7 @@ void* StFwNtfManager::clfFieldMonitorWorker(StFwNtfManager* inst) {
     }
 
   if (timeout) {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << __func__ << "; clfFieldMonitorWorker : timeout !";
+    LOG(ERROR) << __func__ << "; clfFieldMonitorWorker : timeout !";
     // set ourself detached.
     (void)pthread_detach(inst->mStClfFieldMonitorThread);
     inst->mStClfFieldMonitorThread = (pthread_t)NULL;
@@ -1356,8 +1332,7 @@ void* StFwNtfManager::clfFieldMonitorWorker(StFwNtfManager* inst) {
   } else {
     inst->mStClfFieldMonitorSync.end();
   }
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << __func__ << "; clfFieldMonitorWorker : exit";
+  LOG(DEBUG) << __func__ << "; clfFieldMonitorWorker : exit";
   return NULL;
 }
 
@@ -1372,13 +1347,13 @@ void* StFwNtfManager::clfFieldMonitorWorker(StFwNtfManager* inst) {
 void StFwNtfManager::clfMuteMonitor(uint8_t format, uint16_t data_len,
                                     uint8_t* p_data, bool last) {
   if (data_len < 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << __func__ << "; Size too small";
+    LOG(INFO) << __func__ << "; Size too small";
     return;
   }
   uint8_t t = p_data[0];
   uint8_t l = p_data[1];
   if (l != data_len - 2) {
-    LOG_IF(INFO, nfc_debug_enabled) << __func__ << "; Sizes mismatch";
+    LOG(INFO) << __func__ << "; Sizes mismatch";
     return;
   }
 
@@ -1403,8 +1378,7 @@ void StFwNtfManager::clfMuteMonitor(uint8_t format, uint16_t data_len,
       pthread_attr_t pa;
       pthread_t p;
       mSwpCltSent = false;
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; triggered!", __func__);
+      LOG(DEBUG) << StringPrintf("%s; triggered!", __func__);
       // Trigger a call to restart discovery.
       (void)pthread_attr_init(&pa);
       (void)pthread_attr_setdetachstate(&pa, PTHREAD_CREATE_DETACHED);
@@ -1425,8 +1399,7 @@ void StFwNtfManager::clfMuteMonitor(uint8_t format, uint16_t data_len,
  **
  *******************************************************************************/
 void* StFwNtfManager::clfMuteMonitorWorker(StFwNtfManager* inst) {
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << __func__ << "; clfMuteMonitorWorker : started";
+  LOG(DEBUG) << __func__ << "; clfMuteMonitorWorker : started";
   if (android::isDiscoveryStarted()) {
     // Restart RF discovery
     android::startRfDiscovery(false);
@@ -1452,14 +1425,15 @@ void StFwNtfManager::handleVsLogData(uint16_t data_len, uint8_t* p_data) {
   bool doSendUpper = false;
   bool doSendActionUpper = false;
   bool doPollingLoopData = false;
+  bool doCeApdudata = false;
 
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; data_len: 0x%04X ", fn, data_len);
+  LOG(INFO) << StringPrintf("%s; data_len: 0x%04X ", fn, data_len);
 
   {
     SyncEventGuard guard(mVsLogDataEvent);
     doSendActionUpper = mSendNfceeActionNtfToUpper;
     doPollingLoopData = mCollectReaderPollingLoopData;
+    doCeApdudata = mSendCeApduDataToUpper;
   }
 
   for (idx = 0;; ++idx) {
@@ -1509,6 +1483,10 @@ void StFwNtfManager::handleVsLogData(uint16_t data_len, uint8_t* p_data) {
                             p_data + current_tlv_pos,
                             current_tlv_pos + current_tlv_length >= data_len);
     }
+    if (doCeApdudata) {
+      matchCeApduData(p_data[3], current_tlv_length, p_data + current_tlv_pos,
+                      current_tlv_pos + current_tlv_length >= data_len);
+    }
     // go to next TLV
     current_tlv_pos = current_tlv_pos + current_tlv_length;
   }  // idx is now the number of TLVs
@@ -1537,8 +1515,8 @@ void StFwNtfManager::handleVsLogData(uint16_t data_len, uint8_t* p_data) {
       current_tlv_length = p_data[current_tlv_pos + 1] + 2;
       if (current_tlv_pos + current_tlv_length > data_len) break;
       // Send TLV to upper layer
-      LOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; creating java array for index %d", fn, idx);
+      LOG(INFO) << StringPrintf("%s; creating java array for index %d", fn,
+                                idx);
 
       tlv.reset(e->NewByteArray(current_tlv_length));
       e->SetByteArrayRegion(tlv.get(), 0, current_tlv_length,
@@ -1567,8 +1545,8 @@ void StFwNtfManager::handleVsLogData(uint16_t data_len, uint8_t* p_data) {
 void StFwNtfManager::aidTriggerActionCallback(tNFA_EE_ACTION& action) {
   bool doSendUpper = false;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; h=0x%X; trigger = 0x%X", __func__, action.ee_handle, action.trigger);
+  LOG(DEBUG) << StringPrintf("%s; h=0x%X; trigger = 0x%X", __func__,
+                             action.ee_handle, action.trigger);
 
   // Do we need to send the payload to upper layer?
   {
@@ -1652,7 +1630,7 @@ void StFwNtfManager::aidTriggerActionCallback(tNFA_EE_ACTION& action) {
  **
  *******************************************************************************/
 void StFwNtfManager::logManagerEnable(bool enable) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", __func__);
+  LOG(DEBUG) << StringPrintf("%s", __func__);
 
   {
     SyncEventGuard guard(mVsLogDataEvent);
@@ -1671,7 +1649,7 @@ void StFwNtfManager::logManagerEnable(bool enable) {
  *******************************************************************************/
 void StFwNtfManager::actionNtfEnable(bool enable) {
   static const char fn[] = "actionNtfEnable";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+  LOG(DEBUG) << StringPrintf("%s", fn);
 
   {
     SyncEventGuard guard(mVsLogDataEvent);
@@ -1690,7 +1668,7 @@ void StFwNtfManager::actionNtfEnable(bool enable) {
  *******************************************************************************/
 void StFwNtfManager::intfActivatedNtfEnable(bool enable) {
   static const char fn[] = "intfActivatedNtfEnable";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+  LOG(DEBUG) << StringPrintf("%s", fn);
 
   {
     SyncEventGuard guard(mVsLogDataEvent);
@@ -1719,9 +1697,9 @@ void StFwNtfManager::notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata) {
     // We need to send this data to the service
     JNIEnv* e = NULL;
     ScopedAttach attach(mNativeData->vm, &e);
-    LOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; send %db: %02x%02x...", len, pdata[0], pdata[1]);
+    LOG(INFO) << fn
+              << StringPrintf("; send %db: %02x%02x...", len, pdata[0],
+                              pdata[1]);
     if (e == NULL) {
       LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
       return;
@@ -1781,7 +1759,7 @@ bool StFwNtfManager::needMatchSwForNfceeActionNtf() {
  *******************************************************************************/
 void StFwNtfManager::pollingLoopSpyManagerEnable(bool enable) {
   bool isUpdated = false;
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", __func__);
+  LOG(DEBUG) << StringPrintf("%s", __func__);
 
   {
     SyncEventGuard guard(mVsLogDataEvent);
@@ -1835,7 +1813,7 @@ void StFwNtfManager::pollingLoopSpyManagerEnable(bool enable) {
     }
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
+  LOG(DEBUG) << StringPrintf("%s; exit", __func__);
 }
 
 /*******************************************************************************
@@ -1882,8 +1860,7 @@ void* StFwNtfManager::rplWorker(StFwNtfManager* inst) {
     }
 
     if (inst->mRPLUnregistering) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; Unregistering, exit", __func__);
+      LOG(DEBUG) << StringPrintf("%s; Unregistering, exit", __func__);
       break;
     }
 
@@ -1905,18 +1882,17 @@ void* StFwNtfManager::rplWorker(StFwNtfManager* inst) {
             expire.tv_nsec = ns;
           }
           state = RPL_THR_100ms;
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s; INITIAL==>100ms", __func__);
+          LOG(DEBUG) << StringPrintf("%s; INITIAL==>100ms", __func__);
         } else {
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-              "%s; stay in INITIAL (discovery stopped?)", __func__);
+          LOG(DEBUG) << StringPrintf("%s; stay in INITIAL (discovery stopped?)",
+                                     __func__);
         }
         break;
       case RPL_THR_100ms:
         if (!expired) {
           if (inst->mRPLLastDiscoStopTs > inst->mRPLLastFieldOnTs) {
-            DLOG_IF(INFO, nfc_debug_enabled)
-                << StringPrintf("%s; 100ms==>INITIAL (disc stopped)", __func__);
+            LOG(DEBUG) << StringPrintf("%s; 100ms==>INITIAL (disc stopped)",
+                                       __func__);
             state = RPL_THR_INITIAL;
             memset(&expire, 0, sizeof(expire));
           }
@@ -1924,21 +1900,19 @@ void* StFwNtfManager::rplWorker(StFwNtfManager* inst) {
         }
         // 100ms timer expired
         if (inst->mRPLNbEvents == 0) {
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s; 100ms==>INITIAL (no evts)", __func__);
+          LOG(DEBUG) << StringPrintf("%s; 100ms==>INITIAL (no evts)", __func__);
           state = RPL_THR_INITIAL;
           memset(&expire, 0, sizeof(expire));
         } else {
           inst->mRPLState = RPL_ST_TRANSACT;
           state = RPL_THR_TRANS;
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s; 100ms==>TRANS", __func__);
+          LOG(DEBUG) << StringPrintf("%s; 100ms==>TRANS", __func__);
           inst->mRPLSync.end();
 
           NfcStExtensions::getInstance().setObserverMode(false);
 
           // send the string to service
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+          LOG(DEBUG) << StringPrintf(
               "%s: Sending %d events (%d chars) to service", __func__,
               inst->mRPLNbEvents, inst->mRPLStringIndex);
 
@@ -1979,8 +1953,7 @@ void* StFwNtfManager::rplWorker(StFwNtfManager* inst) {
           inst->mRPLState = RPL_ST_OBSERVER;
           state = RPL_THR_INITIAL;
           memset(&expire, 0, sizeof(expire));
-          DLOG_IF(INFO, nfc_debug_enabled)
-              << StringPrintf("%s; TRANS==>INITIAL", __func__);
+          LOG(DEBUG) << StringPrintf("%s; TRANS==>INITIAL", __func__);
           inst->mRPLSync.end();
 
           // start Observer mode
@@ -2010,7 +1983,7 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
   static const char fn[] = "StFwNtfManager::handlePollingLoopData";
 
   if ((format & 0x1) == 0 || data_len < 6) {
-    LOG_IF(INFO, nfc_debug_enabled) << fn << "; TLV without timestamp";
+    LOG(INFO) << fn << "; TLV without timestamp";
     return;
   }
 
@@ -2059,7 +2032,12 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
     case T_CERxError:
       switch (p_data[2] & 0xF) {
         case 0x1:
-          type = 'A';
+          type = 'A';  // received a short frame, we could check the byte in the
+                       // buffer.
+          break;
+        case 0x3:
+          type = 'P';  // received a standard type A frame, it is a proprietary
+                       // protocol
           break;
         case 0x7:
           type = 'B';
@@ -2125,7 +2103,7 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
 int StFwNtfManager::fwTsDiffToUs(uint8_t format, uint32_t fwtsstart,
                                  uint32_t fwtsend) {
   uint32_t diff;
-  float factor = 128 / 28;  // ST21NFCD, ST54J/K: 4.57us
+  float factor = 128.0 / 28;  // ST21NFCD, ST54J/K: 4.57us
   if (fwtsstart <= fwtsend) {
     diff = fwtsend - fwtsstart;
   } else {
@@ -2133,10 +2111,10 @@ int StFwNtfManager::fwTsDiffToUs(uint8_t format, uint32_t fwtsstart,
     diff = (0xFFFFFFFF - fwtsstart) + fwtsend;
   }
   if ((format & 0x30) == 0x30) {
-    // ST54L: 3.84us
-    factor = 256 / 66.666;
+    // ST54L: 3.95us on average
+    factor = 256.0 / 64.75;
   }
-  return (int)((float)diff * factor);
+  return (int)(((float)diff) * factor);
 }
 
 /*******************************************************************************
@@ -2200,4 +2178,248 @@ void StFwNtfManager::rplAddOneEventLocked(uint8_t format, char type,
   }
 
   mRPLNbEvents++;
+}
+
+/*******************************************************************************
+ **
+ ** Function:        ceApduDataEnable
+ **
+ ** Description:
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void StFwNtfManager::ceApduDataEnable(bool enable) {
+  LOG(DEBUG) << StringPrintf("%s", __func__);
+  {
+    SyncEventGuard guard(mVsLogDataEvent);
+    mSendCeApduDataToUpper = enable;
+  }
+}
+
+/*******************************************************************************
+ **
+ ** Function:        matchCeApduData
+ **
+ ** Description:    State machine to try and match SELECT and result.
+ **
+ ** Returns:         void
+ **
+ *******************************************************************************/
+void StFwNtfManager::matchCeApduData(uint8_t format, uint16_t data_len,
+                                     uint8_t* p_data, bool last) {
+  static const char fn[] = "StFwNtfManager::matchCeApduData";
+  int bufLen = 0;
+  uint8_t buffer[4];
+
+  if (data_len < 2) {
+    LOG(DEBUG) << fn << "; Size too small";
+    return;
+  }
+  uint8_t t = p_data[0];
+  uint8_t l = p_data[1];
+  uint32_t receivedFwts = 0;
+  int offset = ((format & 0x30) == 0x10) ? 4 : 5;  // ST21D : 54J/L
+  if (l != data_len - 2) {
+    LOG(DEBUG) << fn << "; Sizes mismatch";
+    return;
+  }
+  if (format & 0x01) {
+    receivedFwts = (p_data[data_len - 4] << 24) | (p_data[data_len - 3] << 16) |
+                   (p_data[data_len - 2] << 8) | p_data[data_len - 1];
+    // we ignore the timestamp
+    data_len -= 4;
+    l -= 4;
+  }
+  LOG(DEBUG) << fn << StringPrintf("; processing t:%02x l:%d", t, l);
+  // from here we assume frame length is correct because data is consistent
+  switch (mCeApduMatchState) {
+    case MATCH_SEL_ST_INITIAL: {
+      switch (t) {
+        case T_fieldOff:
+          mMatchSelectLastFieldOffTs = receivedFwts;
+          break;
+        case T_fieldOn:
+          mMatchSelectLastFieldOffTs = 0;
+          break;
+        case T_firstRx:
+          mCeApduMatchState = MATCH_SEL_ST_GOT_1stRX;
+          LOG(DEBUG) << fn << "; mCeApduMatchState = MATCH_SEL_ST_GOT_1stRX";
+      };
+    } break;
+    case MATCH_SEL_ST_GOT_1stRX: {
+      switch (t) {
+        case T_fieldOff:
+          mMatchSelectLastFieldOffTs = receivedFwts;
+          FALLTHROUGH_INTENDED;
+        case T_fieldLevel:
+          mCeApduMatchState = MATCH_SEL_ST_INITIAL;
+          LOG(DEBUG) << fn << "; mCeApduMatchState = MATCH_SEL_ST_INITIAL";
+          break;
+        case T_CERxError: {
+          if (data_len <= offset) return;
+          uint8_t errstatus = p_data[offset];
+          if (errstatus != 0x00) {
+            // this was an actual error, ignore it
+            break;
+          }
+        }
+          // fallback to T_CERx case if there was no error status.
+          offset++;
+          FALLTHROUGH_INTENDED;
+        case T_CERx: {
+          // Check if we go to ISO-DEP or not
+          switch (p_data[2] & 0xF) {
+            case 0x7: {  // B standard frame.
+              LOG(DEBUG) << fn << "; Rx type B";
+              // SENSB_REQ/ALLB_REQ
+              if ((p_data[offset + 2] == 0x05) &&
+                  (p_data[offset + 3] == 0x00)) {
+                LOG(DEBUG) << fn << "; SENSB_REQ/ALLB_REQ";
+                return;
+              }
+              // SLEEPB_REQ
+              if (p_data[offset + 2] == 0x50) {
+                LOG(DEBUG) << fn << "; SLEEPB_REQ";
+                return;
+              }
+              // ATTRIB
+              if (p_data[offset + 2] == 0x1d) {
+                LOG(DEBUG) << fn
+                           << "; mCeApduMatchState = MATCH_SEL_ST_CE_IN_ISODEP";
+                mCeApduMatchState = MATCH_SEL_ST_CE_IN_ISODEP;
+                return;
+              }
+              // other messages are unexpected (deselect, prop protocols)
+              LOG(DEBUG) << fn << "; mCeApduMatchState = MATCH_SEL_ST_INITIAL";
+              mCeApduMatchState = MATCH_SEL_ST_INITIAL;
+            } break;
+            case 0x3: {  // A standard frame.
+              // SLP_REQ
+              if (p_data[offset + 2] == 0x50) {
+                LOG(DEBUG) << fn << "; SLP_REQ";
+                return;
+              }
+              // RATS
+              if (p_data[offset + 2] == 0xE0) {
+                LOG(DEBUG) << fn
+                           << "; mCeApduMatchState = MATCH_SEL_ST_CE_IN_ISODEP";
+                mCeApduMatchState = MATCH_SEL_ST_CE_IN_ISODEP;
+                return;
+              }
+              // other messages are unexpected
+              LOG(DEBUG) << fn << "; mCeApduMatchState = MATCH_SEL_ST_INITIAL";
+              mCeApduMatchState = MATCH_SEL_ST_INITIAL;
+            } break;
+          }
+        } break;
+      }
+    } break;
+    case MATCH_SEL_ST_CE_IN_ISODEP: {
+      uint16_t realLen;
+      uint8_t realLenDataStart;
+      uint8_t SoD;
+      switch (t) {
+        case T_fieldOff:
+          mMatchSelectLastFieldOffTs = receivedFwts;
+          FALLTHROUGH_INTENDED;
+        case T_fieldLevel:
+          LOG(DEBUG) << fn << "; mCeApduMatchState = MATCH_SEL_ST_INITIAL";
+          mCeApduMatchState = MATCH_SEL_ST_INITIAL;
+          break;
+        case T_CERxError: {
+          if (data_len <= offset) return;
+          uint8_t errstatus = p_data[offset];
+          if (errstatus != 0x00) {
+            // this was an actual error, ignore it
+            break;
+          }
+        }
+          // fallback to T_CERx case if there was no error status.
+          offset++;
+          FALLTHROUGH_INTENDED;
+        case T_CERx: {
+          realLen = p_data[offset] << 8 | p_data[offset + 1];
+          LOG(DEBUG) << fn << StringPrintf("; realLen=%d", realLen);
+          offset += 2;
+          realLenDataStart = offset;
+          SoD = p_data[offset];
+          if ((SoD & 0xC0) != 0x00) {
+            // not an I frame
+            return;
+          }
+          if (SoD & 0x10) return;   // chaining.
+          offset++;                 // skip the SoD
+          if (SoD & 0x4) offset++;  // skip NAD
+          if (SoD & 0x8) offset++;  // skip DID
+          bufLen = 4;
+          for (int i = 0; i < bufLen; i++) {
+            buffer[i] = p_data[offset + i];
+          }
+          mCeApduMatchState = MATCH_SEL_ST_CE_GOT_SELECT;
+          LOG(DEBUG) << fn
+                     << "; mCeApduMatchState = MATCH_SEL_ST_CE_GOT_SELECT";
+        } break;
+      }
+    } break;
+    case MATCH_SEL_ST_CE_GOT_SELECT: {
+      uint16_t realLen;
+      // uint8_t SoD;
+      switch (t) {
+        case T_fieldOff:
+          FALLTHROUGH_INTENDED;
+        case T_fieldLevel:
+          LOG(DEBUG) << fn << "; mCeApduMatchState = MATCH_SEL_ST_INITIAL";
+          mCeApduMatchState = MATCH_SEL_ST_INITIAL;
+          break;
+
+        case T_RxI: {
+          realLen = p_data[3];
+          LOG(DEBUG) << fn << StringPrintf("; realLen=%d", realLen);
+          offset = 5;  // HCI packet header
+          bool has_cb = (p_data[offset] & 0x80) == 0x80;
+          uint8_t pid = p_data[offset] & 0x7F;
+          // we only care what we receive on RF pipes
+          if (pid >= 0x21 && pid <= 0x24) {
+            if (!has_cb) {
+              // if chaining : just store last byte
+              mCeApduMatchPartialLastChainedByte = p_data[data_len - 1];
+            } else {
+              offset++;
+              // if only 1 byte payload, this was frag, otherwise SW in last 2
+              // bytes.
+              if (offset + 1 == data_len) {
+                LOG(DEBUG) << fn << "; split SW";
+                buffer[0] = mCeApduMatchPartialLastChainedByte;
+                buffer[1] = p_data[offset];
+              } else {
+                buffer[0] = p_data[data_len - 2];
+                buffer[1] = p_data[data_len - 1];
+              }
+              bufLen = 2;
+              mCeApduMatchState = MATCH_SEL_ST_CE_IN_ISODEP;
+              LOG(DEBUG) << fn
+                         << "; mCeApduMatchState = MATCH_SEL_ST_CE_IN_ISODEP";
+            }
+          }
+        } break;
+      }
+    } break;
+  }
+
+  // send to Java
+  if (bufLen > 0) {
+    JNIEnv* e = NULL;
+    ScopedAttach attach(mNativeData->vm, &e);
+    if (e == NULL) {
+      LOG(ERROR) << StringPrintf("%s; jni env is null", __func__);
+      return;
+    }
+    ScopedLocalRef<jbyteArray> ntfData(e, e->NewByteArray(bufLen));
+    e->SetByteArrayRegion(ntfData.get(), 0, bufLen, (jbyte*)(buffer));
+
+    e->CallVoidMethod(mNativeData->manager,
+                      android::gCachedNfcManagerNotifyCeApduData,
+                      ntfData.get());
+  }
 }

@@ -14,7 +14,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package com.android.nfcstm.st;
 
 import com.android.nfcstm.DeviceHost;
@@ -36,10 +35,6 @@ public interface StDeviceHost extends DeviceHost {
     public void stopforceRouting();
 
     public void nfceeDiscover();
-
-    boolean doSetMuteTech(boolean muteA, boolean muteB, boolean muteF, boolean commitNeeded);
-
-    boolean doMuteAllTech(boolean doMute);
 
     boolean setObserverMode(boolean enable);
 
@@ -63,11 +58,13 @@ public interface StDeviceHost extends DeviceHost {
 
     boolean setForceSAK(boolean enabled, int sak);
 
-    boolean isMultiTag();
+    // boolean isMultiTag();
 
     void enableIntfActivatedNtf(boolean enabled);
 
     void enablePollingLoopSpy(boolean enabled);
 
     int getRemainingAidTableSize();
+
+    void enableCeApduData(boolean enabled);
 }

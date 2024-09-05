@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2010 The Android Open Source Project
+ * Copyright (C) 2024 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +16,15 @@
 
 package com.android.nfcstm;
 
-/** Represents a LLCP packet received in a LLCP Connectionless communication; */
-public class LlcpPacket {
+import android.app.Activity;
+import android.os.Bundle;
 
-    private int mRemoteSap;
+// Stub for compilation only. Uses #createNfcResolverIntent API instead.
+public class TechListChooserActivity extends Activity {
+    public static final String EXTRA_RESOLVE_INFOS = "rlist";
 
-    private byte[] mDataBuffer;
-
-    public LlcpPacket() {}
-
-    /** Returns the remote Service Access Point number */
-    public int getRemoteSap() {
-        return mRemoteSap;
-    }
-
-    /** Returns the data buffer */
-    public byte[] getDataBuffer() {
-        return mDataBuffer;
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
     }
 }

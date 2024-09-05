@@ -18,8 +18,8 @@
  *  Manage the listen-mode routing table.
  */
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <nativehelper/JNIHelp.h>
 #include <nativehelper/ScopedLocalRef.h>
 
@@ -40,7 +40,6 @@ using android::base::StringPrintf;
 
 extern bool gActivated;
 extern SyncEvent gDeactivatedEvent;
-extern bool nfc_debug_enabled;
 
 const JNINativeMethod StRoutingManager::sMethods[] = {
     {"doGetDefaultRouteDestination", "()I",
@@ -69,6 +68,7 @@ static const uint16_t DEFAULT_SYS_CODE = 0xFEFE;
 static const uint8_t AID_ROUTE_QUAL_PREFIX = 0x10;
 
 static IntervalTimer gTechReconfTimer;
+static IntervalTimer gMepReconfTimer;
 static tNFA_EE_DISCOVER_REQ gTempEeInfo;
 static Mutex sEeInfoMutex;
 static Mutex sEeInfoChangedMutex;
@@ -103,12 +103,11 @@ StRoutingManager::StRoutingManager()
   }
 
   mDefaultFelicaRoute = NfcConfig::getUnsigned(NAME_DEFAULT_NFCF_ROUTE, 0x00);
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; Active SE for Nfc-F is 0x%02X", fn, mDefaultFelicaRoute);
+  LOG(DEBUG) << StringPrintf("%s; Active SE for Nfc-F is 0x%02X", fn,
+                             mDefaultFelicaRoute);
 
   mDefaultEe = NfcConfig::getUnsigned(NAME_DEFAULT_ROUTE, 0x00);
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; default route is 0x%02X", fn, mDefaultEe);
+  LOG(DEBUG) << StringPrintf("%s; default route is 0x%02X", fn, mDefaultEe);
 
   mResolvedDefaultAidRoute = mDefaultEe;
 
@@ -126,8 +125,8 @@ StRoutingManager::StRoutingManager()
     std::vector<uint8_t> pSysCode = NfcConfig::getBytes(NAME_DEFAULT_SYS_CODE);
     if (pSysCode.size() == 0x02) {
       mDefaultSysCode = ((pSysCode[0] << 8) | ((int)pSysCode[1] << 0));
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; DEFAULT_SYS_CODE: 0x%02X", __func__, mDefaultSysCode);
+      LOG(DEBUG) << StringPrintf("%s; DEFAULT_SYS_CODE: 0x%02X", __func__,
+                                 mDefaultSysCode);
     }
   }
 
@@ -167,7 +166,9 @@ StRoutingManager::StRoutingManager()
   mConnectedDefaultAidRoute = 0;
   mIsInit = false;
   mIsSEFelicaCard = false;
-  mMuteTechBitmap = 0;
+  mDiscPollMask = 0;
+  mDiscListenMask = 0;
+  mReceivedMepEeInfo = false;
   mDisconnectedUicc = INVALID_ROUTE_VALUE;
   mPreviousScRoute = INVALID_ROUTE_VALUE;
 }
@@ -207,14 +208,20 @@ bool StRoutingManager::initialize(nfc_jni_native_data* native) {
   mUserDefaultMifareRoute = INVALID_ROUTE_VALUE;
   mUserDefaultScRoute = INVALID_ROUTE_VALUE;
   mUserDefaultAidRoute = INVALID_ROUTE_VALUE;
+  memset(&mEeInfo, 0, sizeof(mEeInfo));
+
+  mWantedAidRouteOnUicc = false;
 
   mIsInit = true;
 
-  mMuteTechBitmap = 0x0;  // all false, nothing blocked
+  mDiscPollMask = 0;
+  mDiscListenMask = 0;
+
+  mLastIsoDepListenMask = NfcStExtensions::HCE_TECH_MASK;
 
   {
     SyncEventGuard guard(mEeRegisterEvent);
-    DLOG_IF(INFO, nfc_debug_enabled) << fn << ": try ee register";
+    LOG(DEBUG) << fn << ": try ee register";
     tNFA_STATUS nfaStat = NFA_EeRegister(nfaEeCallback);
     if (nfaStat != NFA_STATUS_OK) {
       LOG(ERROR) << StringPrintf("%s; fail ee register; error=0x%X", fn,
@@ -235,9 +242,15 @@ bool StRoutingManager::initialize(nfc_jni_native_data* native) {
   // mSeTechMask = updateEeTechRouteSetting();
 
   // Register a wild-card for AIDs routed to the host
-  tNFA_STATUS nfaStat = NFA_CeRegisterAidOnDH(NULL, 0, stackCallback);
-  if (nfaStat != NFA_STATUS_OK)
-    LOG(ERROR) << fn << "Failed to register wildcard AID for DH";
+  {
+    SyncEventGuard guard(mCeRegisterAiOnDHdEvent);
+    tNFA_STATUS nfaStat = NFA_CeRegisterAidOnDH(NULL, 0, stackCallback);
+    if (nfaStat != NFA_STATUS_OK) {
+      LOG(ERROR) << fn << "Failed to register wildcard AID for DH";
+    } else {
+      mCeRegisterAiOnDHdEvent.wait();
+    }
+  }
 
   // updateDefaultRoute();
   // updateDefaultProtocolRoute();
@@ -284,7 +297,7 @@ void StRoutingManager::enableRoutingToHost() {
   tNFA_STATUS nfaStat;
   SyncEventGuard guard(mRoutingEvent);
 
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
+  LOG(DEBUG) << fn;
 
   // Default routing for T3T protocol
   if (!mIsScbrSupported && mDefaultEe == NFC_DH_ID) {
@@ -362,12 +375,16 @@ void StRoutingManager::disableRoutingToHost() {
   static const char fn[] = "StRoutingManager::disableRoutingToHost";
   tNFA_STATUS nfaStat;
   SyncEventGuard guard(mRoutingEvent);
+  uint8_t confPollMask = 0, confListenMask = 0;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
+  LOG(DEBUG) << fn;
 
-  if (mMuteTechBitmap != 0) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("%s; Some techs are muted, do not overwrite", fn);
+  NfcStExtensions::getInstance().getRfConfiguration(&confPollMask,
+                                                    &confListenMask);
+  if (mDiscListenMask != confListenMask) {
+    LOG(DEBUG) << fn
+               << StringPrintf("%s; Some techs are muted, do not overwrite",
+                               fn);
     return;
   }
 
@@ -438,7 +455,7 @@ bool StRoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen,
   static const char fn[] = "StRoutingManager::addAidRouting";
   uint8_t powerState = 0x01;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+  LOG(DEBUG) << StringPrintf(
       "%s; enter, aidLen=%d, route=%02x, aidInfo=%02x, power=%02x", fn, aidLen,
       route, aidInfo, power);
 
@@ -461,20 +478,32 @@ bool StRoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen,
   // Check if this is default AID route
   // Keep track of value
   if (aidLen == 0) {
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; resolved default AID route is 0x%02X", fn, connectedNfceeId);
+    LOG(DEBUG) << StringPrintf("%s; resolved default AID route is 0x%02X", fn,
+                               connectedNfceeId);
     mResolvedDefaultAidRoute = connectedNfceeId;
     mConnectedDefaultAidRoute = connectedNfceeId;
   }
 
-  SyncEventGuard guard(mRoutingEvent);
+  // Check if route is UICC that was previously disconnected due to
+  // no route at the time. If yrd, UICC will be reconencted.
+  if (((route == 0x81) || (route == 0x85) || (route == 0x83)) &&
+      (((!NfcStExtensions::getInstance().isSEConnected(0x02)) &&
+        (mDisconnectedUicc != INVALID_ROUTE_VALUE)))) {
+    connectedNfceeId = mDisconnectedUicc;
+    setEeInfoChangedFlag();
+  }
+
+  SyncEventGuard guard(mAidAddRemoveEvent);
   mAidRoutingConfigured = false;
   tNFA_STATUS nfaStat = NFA_EeAddAidRouting(connectedNfceeId, aidLen,
                                             (uint8_t*)aid, powerState, aidInfo);
   if (nfaStat == NFA_STATUS_OK) {
-    mRoutingEvent.wait();
+    mAidAddRemoveEvent.wait();
   }
   if (mAidRoutingConfigured) {
+    if ((route == 0x81) || (route == 0x85) || (route == 0x83)) {
+      mWantedAidRouteOnUicc = true;
+    }
     return true;
   } else {
     LOG(ERROR) << fn << ": failed to route AID";
@@ -493,7 +522,7 @@ bool StRoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen,
 *******************************************************************************/
 void StRoutingManager::notifyAidAdded() {
   static const char fn[] = "StRoutingManager::notifyAidAdded";
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
+  LOG(DEBUG) << fn;
 
   mAidRoutingConfigured = true;
 
@@ -514,12 +543,13 @@ void StRoutingManager::notifyAidAdded() {
 *******************************************************************************/
 bool StRoutingManager::removeAidRouting(const uint8_t* aid, uint8_t aidLen) {
   static const char fn[] = "StRoutingManager::removeAidRouting";
-  DLOG_IF(INFO, nfc_debug_enabled) << fn << ": enter";
-  SyncEventGuard guard(mRoutingEvent);
+  LOG(DEBUG) << fn << ": enter";
+
+  SyncEventGuard guard(mAidAddRemoveEvent);
   mAidRoutingConfigured = false;
   tNFA_STATUS nfaStat = NFA_EeRemoveAidRouting(aidLen, (uint8_t*)aid);
   if (nfaStat == NFA_STATUS_OK) {
-    mRoutingEvent.wait();
+    mAidAddRemoveEvent.wait();
   }
   if (mAidRoutingConfigured) {
     return true;
@@ -545,14 +575,13 @@ bool StRoutingManager::commitRouting() {
   tNFA_STATUS nfaStat = 0;
 
   if (mDeinitializing) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; De-initializing, exit", fn);
+    LOG(DEBUG) << StringPrintf("%s; De-initializing, exit", fn);
     return true;
   }
 
   sEeInfoChangedMutex.lock();
   if (mEeInfoChanged) {
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; RT update", fn);
+    LOG(DEBUG) << StringPrintf("%s; RT update", fn);
     mEeInfoChanged = false;
     sEeInfoChangedMutex.unlock();
 
@@ -562,7 +591,7 @@ bool StRoutingManager::commitRouting() {
 
     updateRoutingTable();
   } else {
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; No RT update", fn);
+    LOG(DEBUG) << StringPrintf("%s; No RT update", fn);
     sEeInfoChangedMutex.unlock();
   }
 
@@ -575,6 +604,7 @@ bool StRoutingManager::commitRouting() {
   }
 
   mAidRoutingConfigured = false;
+
   return (nfaStat == NFA_STATUS_OK);
 }
 
@@ -592,8 +622,7 @@ bool StRoutingManager::commitRouting() {
 void StRoutingManager::forceRouting(uint8_t nfceeid) {
   static const char fn[] = "StRoutingManager:forceRouting";
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s : nfceeid = 0x%X", fn, nfceeid);
+  LOG(DEBUG) << StringPrintf("%s : nfceeid = 0x%X", fn, nfceeid);
 
   uint8_t config = 0x09;
   if (nfceeid != 0x00) {
@@ -625,7 +654,7 @@ void StRoutingManager::forceRouting(uint8_t nfceeid) {
 void StRoutingManager::stopforceRouting() {
   static const char fn[] = "StRoutingManager:stopforceRouting";
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+  LOG(DEBUG) << StringPrintf("%s", fn);
 
   SyncEventGuard guard(mEeForceRoutingEvent);
   if ((nfaStat = NFA_EeStopForceRouting()) == NFA_STATUS_OK) {
@@ -649,7 +678,7 @@ void StRoutingManager::stopforceRouting() {
 void StRoutingManager::nfceeDiscover() {
   static const char fn[] = "StRoutingManager:nfceeDiscover";
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s : enter", fn);
+  LOG(DEBUG) << StringPrintf("%s : enter", fn);
   SyncEventGuard guard(mEeDiscoverEvent);
   if ((nfaStat = NFA_EeDiscover(nfaEeCallback)) == NFA_STATUS_OK) {
     mEeDiscoverEvent.wait(500);  //   wait for NFA_EE_FORCE_ROUTING_EVT
@@ -671,7 +700,7 @@ void StRoutingManager::nfceeDiscover() {
 *******************************************************************************/
 void StRoutingManager::onNfccShutdown() {
   static const char fn[] = "StRoutingManager:onNfccShutdown";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
+  LOG(DEBUG) << StringPrintf("%s; enter", fn);
 
   if (!(mDefaultOffHostRoute == 0x00 && mDefaultFelicaRoute == 0x00)) {
     tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
@@ -694,7 +723,7 @@ void StRoutingManager::onNfccShutdown() {
                       (eeInfo[xx].ee_status == NFA_EE_STATUS_ACTIVE);
         if (bIsOffHostEEPresent) {
           if ((eeInfo[xx].ee_handle & 0xFF) == 0x10) {
-            DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+            LOG(DEBUG) << StringPrintf(
                 "%s; Handle: 0x%04x, disconnect before deactivate", fn,
                 eeInfo[xx].ee_handle);
             StNdefNfcee::getInstance().enable(false);
@@ -702,7 +731,7 @@ void StRoutingManager::onNfccShutdown() {
             // here.
             continue;
           }
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+          LOG(DEBUG) << StringPrintf(
               "%s; Handle: 0x%04x Change Status Active to Inactive", fn,
               eeInfo[xx].ee_handle);
           SyncEventGuard guard(mEeSetModeEvent);
@@ -716,12 +745,13 @@ void StRoutingManager::onNfccShutdown() {
         }
       }
     } else {
-      DLOG_IF(INFO, nfc_debug_enabled) << fn << "; No active EEs found";
+      LOG(DEBUG) << fn << "; No active EEs found";
     }
   }
 
   gTechReconfTimer.kill();
 
+  gMepReconfTimer.kill();
   // Release mutexes that may still be held
   {
     SyncEventGuard guard(mEeRegisterEvent);
@@ -1000,29 +1030,37 @@ void StRoutingManager::stackCallback(uint8_t event,
   switch (event) {
     case NFA_CE_REGISTERED_EVT: {
       tNFA_CE_REGISTERED& ce_registered = eventData->ce_registered;
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_REGISTERED_EVT; status=0x%X; h=0x%X", fn,
-                          ce_registered.status, ce_registered.handle);
+      LOG(DEBUG) << StringPrintf(
+          "%s; NFA_CE_REGISTERED_EVT; status=0x%X; h=0x%X", fn,
+          ce_registered.status, ce_registered.handle);
+      StRoutingManager.mCeAidOnDHHandle = ce_registered.handle;
       NfcStExtensions::getInstance().nfaConnectionCallback(event, eventData);
+      SyncEventGuard guard(StRoutingManager.mCeRegisterAiOnDHdEvent);
+      StRoutingManager.mCeRegisterAiOnDHdEvent.notifyOne();
     } break;
 
     case NFA_CE_DEREGISTERED_EVT: {
       tNFA_CE_DEREGISTERED& ce_deregistered = eventData->ce_deregistered;
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_CE_DEREGISTERED_EVT; h=0x%X", fn, ce_deregistered.handle);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_DEREGISTERED_EVT; h=0x%X", fn,
+                                 ce_deregistered.handle);
       NfcStExtensions::getInstance().nfaConnectionCallback(event, eventData);
+      SyncEventGuard guard(StRoutingManager.mCeRegisterAiOnDHdEvent);
+      StRoutingManager.mCeRegisterAiOnDHdEvent.notifyOne();
     } break;
 
     case NFA_CE_ACTIVATED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_ACTIVATED_EVT;", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_ACTIVATED_EVT;", fn);
       StRoutingManager.notifyActivated((NFA_TECHNOLOGY_MASK_A));
     } break;
 
     case NFA_DEACTIVATED_EVT:
     case NFA_CE_DEACTIVATED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_DEACTIVATED_EVT, NFA_CE_DEACTIVATED_EVT", fn);
+      if (event == NFA_DEACTIVATED_EVT) {
+        LOG(DEBUG) << StringPrintf("%s; NFA_DEACTIVATED_EVT", fn);
+      } else {
+        LOG(DEBUG) << StringPrintf("%s; NFA_CE_DEACTIVATED_EVT", fn);
+      }
+
       StRoutingManager.notifyDeactivated((NFA_TECHNOLOGY_MASK_A));
       SyncEventGuard g(gDeactivatedEvent);
       gActivated = false;  // guard this variable from multi-threaded access
@@ -1031,9 +1069,9 @@ void StRoutingManager::stackCallback(uint8_t event,
 
     case NFA_CE_DATA_EVT: {
       tNFA_CE_DATA& ce_data = eventData->ce_data;
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_DATA_EVT; stat=0x%X; h=0x%X; data len=%u",
-                          fn, ce_data.status, ce_data.handle, ce_data.len);
+      LOG(DEBUG) << StringPrintf(
+          "%s; NFA_CE_DATA_EVT; stat=0x%X; h=0x%X; data len=%u", fn,
+          ce_data.status, ce_data.handle, ce_data.len);
       getInstance().handleData(NFA_TECHNOLOGY_MASK_A, ce_data.p_data,
                                ce_data.len, ce_data.status);
     } break;
@@ -1070,10 +1108,9 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
     // Check if user has changed the defaukt routes through the
     // NfcAdapterSettings APIs
     if (mUserDefaultFelicaRoute != INVALID_ROUTE_VALUE) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << fn
-          << StringPrintf("; User modified Felica route = 0x%02X",
-                          mUserDefaultFelicaRoute);
+      LOG(DEBUG) << fn
+                 << StringPrintf("; User modified Felica route = 0x%02X",
+                                 mUserDefaultFelicaRoute);
       route = mUserDefaultFelicaRoute;
     }
     mWantedDefaultFelicaRoute = route;
@@ -1083,10 +1120,9 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
     /***************************************************/
     route = mDefaultSysCodeRoute;
     if (mUserDefaultScRoute != INVALID_ROUTE_VALUE) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << fn
-          << StringPrintf("; User modified System Code route = 0x%02X",
-                          mUserDefaultScRoute);
+      LOG(DEBUG) << fn
+                 << StringPrintf("; User modified System Code route = 0x%02X",
+                                 mUserDefaultScRoute);
       route = mUserDefaultScRoute;
     }
     mWantedDefaultScRoute = route;
@@ -1094,7 +1130,7 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
 
   connectedRoute = StSecureElement::getInstance().getConnectedNfceeId(route);
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+  LOG(DEBUG) << StringPrintf(
       "%s; type = %s, requested route = 0x%02X, "
       "connected route = 0x%02X, mIsSEFelicaCard = %d",
       fn,
@@ -1114,9 +1150,9 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
         tNFA_HANDLE eeHandle = localEeInfo.ee_disc_info[i].ee_handle;
 
         if (eeHandle == (connectedRoute | NFA_HANDLE_GROUP_EE)) {
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-              "%s; EE[%u] Handle: 0x%04x  techF: 0x%02x", fn, i, eeHandle,
-              localEeInfo.ee_disc_info[i].lf_protocol);
+          LOG(DEBUG) << StringPrintf("%s; EE[%u] Handle: 0x%04x  techF: 0x%02x",
+                                     fn, i, eeHandle,
+                                     localEeInfo.ee_disc_info[i].lf_protocol);
 
           // Target NFCEE supports type F
           if (localEeInfo.ee_disc_info[i].lf_protocol != 0) {
@@ -1127,8 +1163,8 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
                  (mIsSEFelicaCard)) ||
                 ((connectedRoute == 0x81) || (connectedRoute == 0x83) ||
                  (connectedRoute == 0x85))) {
-              DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-                  "%s; found suitable route = 0x%02X", fn, connectedRoute);
+              LOG(DEBUG) << StringPrintf("%s; found suitable route = 0x%02X",
+                                         fn, connectedRoute);
               return connectedRoute;
             }
           }
@@ -1138,7 +1174,7 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
   }
 
   // Requirements not met, do not use
-  DLOG_IF(INFO, nfc_debug_enabled) << fn << "; No suitable route found";
+  LOG(DEBUG) << fn << "; No suitable route found";
   return -1;
 }
 
@@ -1154,15 +1190,15 @@ int StRoutingManager::getScTypeFRouting(eJNI_ROUTING_TYPE type) {
 **
 *******************************************************************************/
 void StRoutingManager::updateRoutingTable() {
-  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(enter); ";
+  static const char fn[] = "StRoutingManager::updateRoutingTable";
+  LOG(DEBUG) << fn << "(enter); ";
 
   setVarDefaultRoutes();
   // If no UICC route
   if (!checkIfUiccRoute()) {
     // Disable UICC
     if (NfcStExtensions::getInstance().isSEConnected(0x02)) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << __func__ << "; No route to UICC, disabling";
+      LOG(DEBUG) << fn << "; No route to UICC, disabling";
 
       mDisconnectedUicc =
           StSecureElement::getInstance().getConnectedNfceeId(0x81);
@@ -1173,7 +1209,7 @@ void StRoutingManager::updateRoutingTable() {
     // Enable UICC
     if ((!NfcStExtensions::getInstance().isSEConnected(0x02)) &&
         (mDisconnectedUicc != INVALID_ROUTE_VALUE)) {
-      DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "; Restore UICC enable";
+      LOG(DEBUG) << fn << "; Restore UICC enable";
       StSecureElement::getInstance().EnableSE(mDisconnectedUicc, true);
       mDisconnectedUicc = INVALID_ROUTE_VALUE;
 
@@ -1184,7 +1220,37 @@ void StRoutingManager::updateRoutingTable() {
   mSeTechMask = updateEeTechRouteSetting();
   updateDefaultProtocolRoute();
   updateDefaultRoute();
-  DLOG_IF(INFO, nfc_debug_enabled) << __func__ << "(exit); ";
+  LOG(DEBUG) << fn << "(exit); ";
+}
+
+/*******************************************************************************
+**
+** Function:        updateIsoDepProtocolRoute
+**
+** Description:     Receive execution environment-related events from stack.
+**                  event: Event code.
+**                  eventData: Event data.
+**
+** Returns:         None
+**
+*******************************************************************************/
+void StRoutingManager::updateIsoDepProtocolRoute(int route) {
+  static const char fn[] = "StRoutingManager::updateIsoDepProtocolRoute";
+
+  LOG(DEBUG) << fn;
+  // tNFA_PROTOCOL_MASK protoMask = NFA_PROTOCOL_MASK_ISO_DEP;
+  // tNFA_STATUS nfaStat;
+
+  // SyncEventGuard guard(mRoutingEvent);
+  // nfaStat = NFA_EeClearDefaultProtoRouting(mDefaultIsoDepRoute, protoMask);
+  // if (nfaStat == NFA_STATUS_OK)
+  //   mRoutingEvent.wait();
+  // else
+  //   LOG(ERROR) << fn << "; Fail to clear IsoDep route";
+
+  setEeInfoChangedFlag();
+  mDefaultIsoDepRoute = route;
+  // updateDefaultProtocolRoute();
 }
 
 /*******************************************************************************
@@ -1203,7 +1269,7 @@ void StRoutingManager::updateDefaultProtocolRoute() {
   // SyncEventGuard guard(mRoutingEvent);
   tNFA_STATUS nfaStat;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
+  LOG(DEBUG) << fn;
 
   /**************************************************************/
   /****************** Update ISO-DEP  route *********************/
@@ -1245,7 +1311,7 @@ void StRoutingManager::updateDefaultRoute() {
   static const char fn[] = "StRoutingManager::updateDefaultRoute";
   tNFA_STATUS nfaStat;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
+  LOG(DEBUG) << fn;
 
   /**************************************************************/
   /**************** Update default AID routes *******************/
@@ -1272,8 +1338,7 @@ void StRoutingManager::updateDefaultRoute() {
       }
     }
   } else {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << "; Default AID already programmed";
+    LOG(DEBUG) << fn << "; Default AID already programmed";
   }
 
   /**************************************************************/
@@ -1286,10 +1351,9 @@ void StRoutingManager::updateDefaultRoute() {
   if ((mConnectedDefaultScRoute == -1) ||
       ((mPreviousScRoute != mConnectedDefaultScRoute) &&
        (mScRoutingConfigured == true))) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << "; Default system code route has changed while HCE-F is on OR"
-           " no suitable entry for SC";
+    LOG(DEBUG) << fn
+               << "; Default system code route has changed while HCE-F is on OR"
+                  " no suitable entry for SC";
     // Unregister System Code for routing
     SyncEventGuard guard(mRoutingEvent);
     tNFA_STATUS nfaStat = NFA_EeRemoveSystemCodeRouting(mDefaultSysCode);
@@ -1299,8 +1363,7 @@ void StRoutingManager::updateDefaultRoute() {
     } else if (nfaStat == NFA_STATUS_OK) {
       mIsScbrSupported = true;
       mRoutingEvent.wait();
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << fn << ": Succeed to de-register system code";
+      LOG(DEBUG) << fn << ": Succeed to de-register system code";
 
       reconfHceFNeeded = true;
     } else {
@@ -1329,6 +1392,38 @@ void StRoutingManager::updateDefaultRoute() {
 
 /*******************************************************************************
 **
+** Function:        updateTechnologyABRoute
+**
+** Description:     Receive execution environment-related events from stack.
+**                  event: Event code.
+**                  eventData: Event data.
+**
+** Returns:         None
+**
+*******************************************************************************/
+tNFA_TECHNOLOGY_MASK StRoutingManager::updateTechnologyABRoute(int route) {
+  static const char fn[] = "StRoutingManager::updateTechnologyABRoute";
+
+  LOG(DEBUG) << fn;
+  // tNFA_STATUS nfaStat;
+
+  // SyncEventGuard guard(mRoutingEvent);
+  // nfaStat = NFA_EeClearDefaultTechRouting(
+  //     mDefaultOffHostRoute,
+  //     NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B | NFA_TECHNOLOGY_MASK_F);
+  // if (nfaStat == NFA_STATUS_OK)
+  //   mRoutingEvent.wait();
+  // else
+  //   LOG(ERROR) << fn << "Fail to clear Tech route";
+
+  setEeInfoChangedFlag();
+  mDefaultOffHostRoute = route;
+  return 0;
+  // return updateEeTechRouteSetting();
+}
+
+/*******************************************************************************
+**
 ** Function:        updateEeTechRouteSetting
 **
 ** Description:     Receive execution environment-related events from stack.
@@ -1343,8 +1438,9 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
   tNFA_TECHNOLOGY_MASK allSeTechMask = 0x00;
   SyncEventGuard guard(mRoutingEvent);
   bool isRfReconfNeeded = false, ndefNfceeDisable = false;
+  NfcStExtensions& natStExt = NfcStExtensions::getInstance();
 
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
+  LOG(DEBUG) << fn;
 
   // Get content of mEeInfo as it can change if a NTF is received during update
   // of RT
@@ -1358,11 +1454,8 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
   /**************************************************************/
   mSeTechMask = 0;
   bool muteTechSet = false;
-  uint8_t config[NfcStExtensions::RF_CONFIG_ARRAY_SIZE];
-  int rfBitmap = NfcStExtensions::getInstance().getRfConfiguration(config);
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; Nb NFCEE: %d", fn, localEeInfo.num_ee);
+  LOG(DEBUG) << StringPrintf("%s; Nb NFCEE: %d", fn, localEeInfo.num_ee);
 
   tNFA_STATUS nfaStat;
   for (uint8_t i = 0; i < localEeInfo.num_ee; i++) {
@@ -1370,11 +1463,8 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
     tNFA_TECHNOLOGY_MASK seTechMask = 0;
 
     // Check if HCI NFCEE
-    if (!(eeHandle & 0x80)) {
-      continue;
-    }
 
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+    LOG(DEBUG) << StringPrintf(
         "%s;   EE[%u] Handle: 0x%04x  techA: 0x%02x  techB: "
         "0x%02x  techF: 0x%02x",
         fn, i, eeHandle, localEeInfo.ee_disc_info[i].la_protocol,
@@ -1426,9 +1516,9 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
     }
 
     if (seTechMask != 0x00) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; Configuring tech mask 0x%02x on NFCEE 0x%04x",
-                          fn, seTechMask, eeHandle);
+      LOG(DEBUG) << StringPrintf(
+          "%s; Configuring tech mask 0x%02x on NFCEE 0x%04x", fn, seTechMask,
+          eeHandle);
 
       // SyncEventGuard guard(mRoutingEvent);
       nfaStat = NFA_EeSetDefaultTechRouting(
@@ -1444,53 +1534,64 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
 
       allSeTechMask |= seTechMask;
     } else {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; No techs to configure for NFCEE 0x%02X", fn, eeHandle);
+      LOG(DEBUG) << StringPrintf("%s; No techs to configure for NFCEE 0x%02X",
+                                 fn, eeHandle);
     }
 
     /*** Check if a tech shall be muted - only for HCI EE ***/
     if (eeHandle == (mConnectedDefaultOffHostRoute | NFA_HANDLE_GROUP_EE)) {
-      if (NfcStExtensions::getInstance().getObserverMode()) {
-        NFA_SetMuteTech(false, false, false);
+      if (natStExt.getObserverMode()) {
+        NFA_ChangeDiscoveryTech(mDiscPollMask, 0x00,
+                                (mDiscPollMask < 0 ? true : false), true);
         muteTechSet = true;
-      } else if (((eeHandle & 0x480) == 0x480) && (mMuteTechBitmap == 0) &&
+      } else if (((eeHandle & 0x480) == 0x480) &&
+                 (mDiscListenMask == mLastIsoDepListenMask) &&
                  ((seTechMask &
                    (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) != 0)) {
         // if we are configuring the default route to HCI EE which supports A
         // and/or B:
-        NFA_SetMuteTech((seTechMask & NFA_TECHNOLOGY_MASK_A) == 0,
-                        (seTechMask & NFA_TECHNOLOGY_MASK_B) == 0, false);
+        int listenMask = mDiscListenMask;
+        // If A not supported, block A
+        if ((seTechMask & NFA_TECHNOLOGY_MASK_A) == 0) {
+          listenMask &= ~NFA_TECHNOLOGY_MASK_A;
+        }
+        // If B not supported, block B
+        if ((seTechMask & NFA_TECHNOLOGY_MASK_B) == 0) {
+          listenMask &= ~NFA_TECHNOLOGY_MASK_B;
+        }
+        NFA_ChangeDiscoveryTech(mDiscPollMask, listenMask,
+                                (mDiscPollMask < 0 ? true : false), false);
       } else {
         // other cases, we just follow mMuteTechBitmap
-        NFA_SetMuteTech(((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_A) != 0),
-                        ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_B) != 0),
-                        ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F) != 0));
+        NFA_ChangeDiscoveryTech(mDiscPollMask, mDiscListenMask,
+                                (mDiscPollMask < 0 ? true : false),
+                                (mDiscListenMask < 0 ? true : false));
       }
       muteTechSet = true;
     }
 
     /*** Special case: NFCEE only supports A for MIFARE protocol and B for
-       ISO-DEP
-        => remove type A for HCE in polling loop ***/
-    // If HCE is enabled and NFCEE on to support A Mifare/B ISO-DEP
-    if (rfBitmap & (0x1 << NfcStExtensions::CE_IDX)) {
+   ISO-DEP
+    => remove type A for HCE in polling loop ***/
+    if ((eeHandle == (mConnectedDefaultOffHostRoute | NFA_HANDLE_GROUP_EE)) ||
+        (mConnectedDefaultOffHostRoute == 0)) {
+      // If HCE is enabled and NFCEE on to support A Mifare/B ISO-DEP
       if ((nfceeFullmask == (TECH_B_ISO_DEP | TECH_A_MIFARE)) ||
           (nfceeFullmask == TECH_A_MIFARE)) {
-        DLOG_IF(INFO, nfc_debug_enabled)
-            << StringPrintf("%s; nfceeFullmask=0x%02x", fn, nfceeFullmask);
-
+        LOG(DEBUG) << StringPrintf(
+            "%s; nfceeFullmask=0x%02x, mLastIsoDepListenMask=0x%x", fn,
+            nfceeFullmask, mLastIsoDepListenMask);
         // Need to remove type A from HCE, if not yet done
-        if ((config[NfcStExtensions::CE_IDX] & NFA_TECHNOLOGY_MASK_A) != 0) {
-          config[NfcStExtensions::CE_IDX] &= ~NFA_TECHNOLOGY_MASK_A;
+        if ((mLastIsoDepListenMask & NFA_TECHNOLOGY_MASK_A) != 0) {
+          mLastIsoDepListenMask &= ~NFA_TECHNOLOGY_MASK_A;
           isRfReconfNeeded = true;
         }
 
         ndefNfceeDisable = true;
-      } else if (((config[NfcStExtensions::CE_IDX] & NFA_TECHNOLOGY_MASK_A) ==
-                  0) &&
+      } else if (((mLastIsoDepListenMask & NFA_TECHNOLOGY_MASK_A) == 0) &&
                  ((NFA_TECHNOLOGY_MASK_A & mHostListenTechMask) != 0)) {
         // Need to restore type A in HCE if needed
-        config[NfcStExtensions::CE_IDX] |= NFA_TECHNOLOGY_MASK_A;
+        mLastIsoDepListenMask |= NFA_TECHNOLOGY_MASK_A;
         isRfReconfNeeded = true;
       }
     }
@@ -1498,14 +1599,31 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
 
   if (isRfReconfNeeded) {
     StNdefNfcee::getInstance().enable(!ndefNfceeDisable);
-    NfcStExtensions::getInstance().setRfConfiguration(rfBitmap, config);
+    {
+      SyncEventGuard guard(mCeRegisterAiOnDHdEvent);
+      if (NFA_CeDeregisterAidOnDH(mCeAidOnDHHandle) != NFA_STATUS_OK) {
+        LOG(ERROR) << fn << "Failed to deregister wildcard AID for DH";
+      }
+      mCeRegisterAiOnDHdEvent.wait();
+    }
+    if (NFA_CeSetIsoDepListenTech(mLastIsoDepListenMask) != NFA_STATUS_OK) {
+      LOG(ERROR) << fn << "; Fail to change listen tech";
+    }
+    // Register a wild-card for AIDs routed to the host
+    {
+      SyncEventGuard guard(mCeRegisterAiOnDHdEvent);
+      if (NFA_CeRegisterAidOnDH(NULL, 0, stackCallback) != NFA_STATUS_OK) {
+        LOG(ERROR) << fn << "Failed to register wildcard AID for DH";
+      }
+      mCeRegisterAiOnDHdEvent.wait();
+    }
   }
 
   if (!muteTechSet) {
     // ensure the mask is restored
-    NFA_SetMuteTech(((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_A) != 0),
-                    ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_B) != 0),
-                    ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F) != 0));
+    NFA_ChangeDiscoveryTech(mDiscPollMask, mDiscListenMask,
+                            (mDiscPollMask < 0 ? true : false),
+                            (mDiscListenMask < 0 ? true : false));
   }
 
   /**************************************************************/
@@ -1519,7 +1637,9 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
     if ((NfcStExtensions::HCE_TECH_MASK & NFA_TECHNOLOGY_MASK_A) &&
         ((allSeTechMask & NFA_TECHNOLOGY_MASK_A) == 0)) {
       nfaStat = NFA_EeSetDefaultTechRouting(
-          NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
+          NFC_DH_ID, techMask, mSecureNfcEnabled ? 0 : techMask, 0,
+          mSecureNfcEnabled ? 0 : techMask, mSecureNfcEnabled ? 0 : techMask,
+          mSecureNfcEnabled ? 0 : techMask);
       if (nfaStat == NFA_STATUS_OK)
         mRoutingEvent.wait();
       else
@@ -1530,7 +1650,9 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
     if ((NfcStExtensions::HCE_TECH_MASK & NFA_TECHNOLOGY_MASK_B) &&
         ((allSeTechMask & NFA_TECHNOLOGY_MASK_B) == 0)) {
       nfaStat = NFA_EeSetDefaultTechRouting(
-          NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
+          NFC_DH_ID, techMask, mSecureNfcEnabled ? 0 : techMask, 0,
+          mSecureNfcEnabled ? 0 : techMask, mSecureNfcEnabled ? 0 : techMask,
+          mSecureNfcEnabled ? 0 : techMask);
       if (nfaStat == NFA_STATUS_OK)
         mRoutingEvent.wait();
       else
@@ -1541,9 +1663,11 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
     techMask = NFA_TECHNOLOGY_MASK_F;
     if ((mConnectedDefaultFelicaRoute == 0) ||
         ((mConnectedDefaultFelicaRoute == -1) &&
-         (mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F))) {
+         ((mDiscListenMask & NFA_TECHNOLOGY_MASK_F) == 0))) {
       nfaStat = NFA_EeSetDefaultTechRouting(
-          NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
+          NFC_DH_ID, techMask, mSecureNfcEnabled ? 0 : techMask, 0,
+          mSecureNfcEnabled ? 0 : techMask, mSecureNfcEnabled ? 0 : techMask,
+          mSecureNfcEnabled ? 0 : techMask);
       if (nfaStat == NFA_STATUS_OK)
         mRoutingEvent.wait();
       else
@@ -1573,9 +1697,9 @@ void StRoutingManager::setVarDefaultRoutes() {
   // Check if user has changed the defaukt routes through the NfcAdapterSettings
   // APIs
   if (mUserDefaultOffHostRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; User modified default OffHost route = 0x%02X", fn,
-                        mUserDefaultOffHostRoute);
+    LOG(DEBUG) << StringPrintf(
+        "%s; User modified default OffHost route = 0x%02X", fn,
+        mUserDefaultOffHostRoute);
     offHostRoute = mUserDefaultOffHostRoute;
   }
   mWantedDefaultOffHostRoute = offHostRoute;
@@ -1583,22 +1707,20 @@ void StRoutingManager::setVarDefaultRoutes() {
   mConnectedDefaultOffHostRoute =
       StSecureElement::getInstance().getConnectedNfceeId(offHostRoute);
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; Default Tech A/B route = 0x%02X",
-                      mConnectedDefaultOffHostRoute);
+  LOG(DEBUG) << fn
+             << StringPrintf("; Default Tech A/B route = 0x%02X",
+                             mConnectedDefaultOffHostRoute);
 
   /***************************************************/
   /**************** Check Felica route ***************/
   /***************************************************/
   mConnectedDefaultFelicaRoute = getScTypeFRouting(ROUTING_TYPE_F);
   if (mConnectedDefaultFelicaRoute != -1) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; Default Felica route = 0x%02X",
-                        mConnectedDefaultFelicaRoute);
+    LOG(DEBUG) << fn
+               << StringPrintf("; Default Felica route = 0x%02X",
+                               mConnectedDefaultFelicaRoute);
   } else {
-    DLOG_IF(INFO, nfc_debug_enabled) << fn << StringPrintf("; No Felica route");
+    LOG(DEBUG) << fn << StringPrintf("; No Felica route");
   }
 
   /***************************************************/
@@ -1607,19 +1729,17 @@ void StRoutingManager::setVarDefaultRoutes() {
   mConnectedDefaultMifareRoute = INVALID_ROUTE_VALUE;
   mWantedDefaultMifareRoute = INVALID_ROUTE_VALUE;
   if (mUserDefaultMifareRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User set a MIFARE route = 0x%02X",
-                        mUserDefaultMifareRoute);
+    LOG(DEBUG) << fn
+               << StringPrintf("; User set a MIFARE route = 0x%02X",
+                               mUserDefaultMifareRoute);
     mWantedDefaultMifareRoute = mUserDefaultMifareRoute;
     mConnectedDefaultMifareRoute =
         StSecureElement::getInstance().getConnectedNfceeId(
             mUserDefaultMifareRoute);
 
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; Default MIFARE route = 0x%02X",
-                        mConnectedDefaultMifareRoute);
+    LOG(DEBUG) << fn
+               << StringPrintf("; Default MIFARE route = 0x%02X",
+                               mConnectedDefaultMifareRoute);
   }
 
   /***************************************************/
@@ -1627,9 +1747,8 @@ void StRoutingManager::setVarDefaultRoutes() {
   /***************************************************/
   int aidRoute = mResolvedDefaultAidRoute;
   if (mUserDefaultAidRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; User modified default AID route = 0x%02X", fn,
-                        mUserDefaultAidRoute);
+    LOG(DEBUG) << StringPrintf("%s; User modified default AID route = 0x%02X",
+                               fn, mUserDefaultAidRoute);
     aidRoute = mUserDefaultAidRoute;
   }
   mWantedDefaultAidRoute = aidRoute;
@@ -1639,10 +1758,9 @@ void StRoutingManager::setVarDefaultRoutes() {
   // Check ISO-DEP support
   mConnectedDefaultAidRoute = checkIsoDepSupport(mConnectedDefaultAidRoute);
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; Default AID route = 0x%02X",
-                      mConnectedDefaultAidRoute);
+  LOG(DEBUG) << fn
+             << StringPrintf("; Default AID route = 0x%02X",
+                             mConnectedDefaultAidRoute);
 
   /***************************************************/
   /***************** Check SC route ******************/
@@ -1650,12 +1768,11 @@ void StRoutingManager::setVarDefaultRoutes() {
   mPreviousScRoute = mConnectedDefaultScRoute;
   mConnectedDefaultScRoute = getScTypeFRouting(ROUTING_SYSTEM_CODE);
   if (mConnectedDefaultScRoute != -1) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; Default SC route = 0x%02X",
-                        mConnectedDefaultScRoute);
+    LOG(DEBUG) << fn
+               << StringPrintf("; Default SC route = 0x%02X",
+                               mConnectedDefaultScRoute);
   } else {
-    DLOG_IF(INFO, nfc_debug_enabled) << fn << StringPrintf("; No SC route");
+    LOG(DEBUG) << fn << StringPrintf("; No SC route");
   }
 
   /***************************************************/
@@ -1665,9 +1782,8 @@ void StRoutingManager::setVarDefaultRoutes() {
   // Check if user has changed the defaukt routes through the NfcAdapterSettings
   // APIs
   if (mUserDefaultIsoDepRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; User modified ISO-DEP route = 0x%02X", fn,
-                        mUserDefaultIsoDepRoute);
+    LOG(DEBUG) << StringPrintf("%s; User modified ISO-DEP route = 0x%02X", fn,
+                               mUserDefaultIsoDepRoute);
     isoDepRoute = mUserDefaultIsoDepRoute;
   }
   mWantedDefaultIsoDepRoute = isoDepRoute;
@@ -1678,10 +1794,9 @@ void StRoutingManager::setVarDefaultRoutes() {
   mConnectedDefaultIsoDepRoute =
       checkIsoDepSupport(mConnectedDefaultIsoDepRoute);
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; Default ISO-DEP route = 0x%02X",
-                      mConnectedDefaultIsoDepRoute);
+  LOG(DEBUG) << fn
+             << StringPrintf("; Default ISO-DEP route = 0x%02X",
+                             mConnectedDefaultIsoDepRoute);
 }
 
 /*******************************************************************************
@@ -1700,501 +1815,47 @@ bool StRoutingManager::checkIfUiccRoute() {
 
   /*************** Check Off Host route **************/
   if ((mWantedDefaultOffHostRoute & 0x01) != 0x00) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Default Tech A/B route is UICC");
+    LOG(DEBUG) << fn << StringPrintf("; Default Tech A/B route is UICC");
     return true;
   }
 
   /**************** Check Felica route ***************/
   if ((mWantedDefaultFelicaRoute & 0x01) != 0x00) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Felica route is UICC");
+    LOG(DEBUG) << fn << StringPrintf("; Felica route is UICC");
     return true;
   }
 
   /*************** Check MIFARE route ****************/
   if ((mWantedDefaultMifareRoute != 0xFF) &&
       ((mWantedDefaultMifareRoute & 0x01) != 0x00)) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Mifare route is UICC");
+    LOG(DEBUG) << fn << StringPrintf("; Mifare route is UICC");
     return true;
   }
 
   /************ Check default AID route **************/
   if ((mWantedDefaultAidRoute & 0x01) != 0x00) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Default AID route is UICC");
+    LOG(DEBUG) << fn << StringPrintf("; Default AID route is UICC");
     return true;
   }
 
   /***************** Check SC route ******************/
   if ((mWantedDefaultScRoute & 0x01) != 0x00) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Default SC route is UICC");
+    LOG(DEBUG) << fn << StringPrintf("; Default SC route is UICC");
     return true;
   }
 
   /*************** Check ISO-DEP route ***************/
   if ((mWantedDefaultIsoDepRoute & 0x01) != 0x00) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Default ISO-DEP route is UICC");
+    LOG(DEBUG) << fn << StringPrintf("; Default ISO-DEP route is UICC");
+    return true;
+  }
+
+  /************** Check AID routes *******************/
+  if (mWantedAidRouteOnUicc) {
+    LOG(DEBUG) << fn << StringPrintf("; At least one AID route is UICC");
     return true;
   }
   return false;
-}
-
-/*******************************************************************************
-**
-** Function:        updateFullRoutes
-**
-** Description:     Reprograms the ISO-DEP, SC and A/F tech routing (if no
-**                  NFCEE supports them)
-**                  This is done on NFCEE state changes (notifyEeUpdated())
-**
-** Returns:         None
-**
-*******************************************************************************/
-void StRoutingManager::updateFullRoutes() {
-  static const char fn[] = "StRoutingManager::updateFullRoutes";
-  tNFA_STATUS nfaStat;
-
-  DLOG_IF(INFO, nfc_debug_enabled) << fn;
-
-  // Get content of mEeInfo as it can change if a NTF is received during update
-  // of RT
-  sEeInfoMutex.lock();
-  tNFA_EE_DISCOVER_REQ localEeInfo;
-  memcpy(&localEeInfo, &mEeInfo, sizeof(mEeInfo));
-  sEeInfoMutex.unlock();
-
-  /***************************************************/
-  /************* Check default AID route *************/
-  /***************************************************/
-  int aidRoute = mResolvedDefaultAidRoute;
-  if (mUserDefaultAidRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User modified default AID route = 0x%02X",
-                        mUserDefaultAidRoute);
-    aidRoute = mUserDefaultAidRoute;
-  }
-  int connectedDefaultEe =
-      StSecureElement::getInstance().getConnectedNfceeId(aidRoute);
-
-  // Check ISO-DEP support
-  connectedDefaultEe = checkIsoDepSupport(connectedDefaultEe);
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn << StringPrintf("; Default AID route = 0x%02X", connectedDefaultEe);
-
-  /***************************************************/
-  /**************** Check ISO-DEP route **************/
-  /***************************************************/
-  int isoDepRoute = mDefaultIsoDepRoute;
-  // Check if user has changed the defaukt routes through the NfcAdapterSettings
-  // APIs
-  if (mUserDefaultIsoDepRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User modified ISO-DEP route = 0x%02X",
-                        mUserDefaultIsoDepRoute);
-    isoDepRoute = mUserDefaultIsoDepRoute;
-  }
-  int connectedIsoDepRoute =
-      StSecureElement::getInstance().getConnectedNfceeId(isoDepRoute);
-
-  // Check ISO-DEP support
-  connectedIsoDepRoute = checkIsoDepSupport(connectedIsoDepRoute);
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; Default ISO-DEP route = 0x%02X", connectedIsoDepRoute);
-
-  /***************************************************/
-  /*************** Check Off Host route **************/
-  /***************************************************/
-  int offHostRoute = mDefaultOffHostRoute;
-  // Check if user has changed the defaukt routes through the NfcAdapterSettings
-  // APIs
-  if (mUserDefaultOffHostRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User modified OffHost route = 0x%02X",
-                        mUserDefaultOffHostRoute);
-    offHostRoute = mUserDefaultOffHostRoute;
-  }
-  int connectedDefaultOffHostRoute =
-      StSecureElement::getInstance().getConnectedNfceeId(offHostRoute);
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; Default Tech A/B route = 0x%02X",
-                      connectedDefaultOffHostRoute);
-
-  /***************************************************/
-  /****************** Check SC route *****************/
-  /***************************************************/
-  int scRoute = mDefaultSysCodeRoute;
-  if (mUserDefaultScRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User modified System Code route = 0x%02X",
-                        mUserDefaultScRoute);
-    scRoute = mUserDefaultScRoute;
-  }
-
-  /***************************************************/
-  /*************** Check Felica route ****************/
-  /***************************************************/
-  int felicaRoute = mDefaultFelicaRoute;
-  // Check if user has changed the defaukt routes through the NfcAdapterSettings
-  // APIs
-  if (mUserDefaultFelicaRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User modified Felica route = 0x%02X",
-                        mUserDefaultFelicaRoute);
-    felicaRoute = mUserDefaultFelicaRoute;
-  }
-
-  if (scRoute != felicaRoute) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf(
-               "; WARNING: default SC route and Felica route are different");
-  }
-
-  felicaRoute = getScTypeFRouting(ROUTING_TYPE_F);
-  int sysCodeRoute = getScTypeFRouting(ROUTING_SYSTEM_CODE);
-
-  if (felicaRoute != -1) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Default Felica route = 0x%02X", felicaRoute);
-  } else {
-    DLOG_IF(INFO, nfc_debug_enabled) << fn << StringPrintf("; No Felica route");
-  }
-  if (sysCodeRoute != -1) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << StringPrintf("; Default SC route = 0x%02X", sysCodeRoute);
-  } else {
-    DLOG_IF(INFO, nfc_debug_enabled) << fn << StringPrintf("; No SC route");
-  }
-  /***************************************************/
-  /*************** Check MIFARE route ****************/
-  /***************************************************/
-  int connectedMifareRoute = INVALID_ROUTE_VALUE;
-  if (mUserDefaultMifareRoute != INVALID_ROUTE_VALUE) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << StringPrintf("; User set a MIFARE route = 0x%02X",
-                        mUserDefaultMifareRoute);
-    connectedMifareRoute = StSecureElement::getInstance().getConnectedNfceeId(
-        mUserDefaultMifareRoute);
-  }
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << fn
-      << StringPrintf("; Default MIFARE route = 0x%02X", connectedMifareRoute);
-
-  /**************************************************************/
-  /**************** Update default AID routes *******************/
-  /**************************************************************/
-
-  // If there was no AID updated
-  if (mAidRoutingConfigured == false) {
-    uint8_t powerState = 0x01;
-    if (!mSecureNfcEnabled)
-      powerState =
-          (connectedDefaultEe != 0x00) ? mOffHostAidRoutingPowerState : 0x11;
-
-    {
-      SyncEventGuard guard(mRoutingEvent);
-      mAidRoutingConfigured = false;
-      nfaStat = NFA_EeAddAidRouting(connectedDefaultEe, 0, NULL, powerState,
-                                    AID_ROUTE_QUAL_PREFIX);
-      if (nfaStat == NFA_STATUS_OK) {
-        mRoutingEvent.wait();
-      }
-      if (mAidRoutingConfigured) {
-      } else {
-        LOG(ERROR) << fn << "; failed to register zero length AID";
-      }
-    }
-  } else {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn << "; Default AID route already configured";
-  }
-
-  /**************************************************************/
-  /***************** Update protocol routes *********************/
-  /**************************************************************/
-
-  // Default Routing for ISO-DEP
-  tNFA_PROTOCOL_MASK protoMask = NFA_PROTOCOL_MASK_ISO_DEP;
-  {
-    SyncEventGuard guard(mRoutingEvent);
-    if (connectedIsoDepRoute != NFC_DH_ID) {
-      nfaStat = NFA_EeSetDefaultProtoRouting(
-          connectedIsoDepRoute, protoMask, mSecureNfcEnabled ? 0 : protoMask, 0,
-          mSecureNfcEnabled ? 0 : protoMask, mSecureNfcEnabled ? 0 : protoMask,
-          mSecureNfcEnabled ? 0 : protoMask);
-    } else {
-      nfaStat = NFA_EeSetDefaultProtoRouting(
-          NFC_DH_ID, protoMask, 0, 0, mSecureNfcEnabled ? 0 : protoMask, 0, 0);
-    }
-    if (nfaStat == NFA_STATUS_OK) {
-      mRoutingEvent.wait();
-    } else {
-      LOG(ERROR) << fn << "; failed to register default ISO-DEP route";
-    }
-  }
-  /**************************************************************/
-  /**************** Update System code route ********************/
-  /**************************************************************/
-
-  // Check if default host has changed while HCE-F is ON
-  // in this case need to reprog the default SC route
-  // please note that this should only happen during tests
-  int reconfHceFNeeded = false;
-  if ((sysCodeRoute == -1) || ((sysCodeRoute != mConnectedDefaultScRoute) &&
-                               (mScRoutingConfigured == true))) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << fn
-        << "; Default SC route changed while HCE-F on OR"
-           " no suitable entry for SC";
-    // Unregister System Code for routing
-    SyncEventGuard guard(mRoutingEvent);
-    tNFA_STATUS nfaStat = NFA_EeRemoveSystemCodeRouting(mDefaultSysCode);
-    if (nfaStat == NFA_STATUS_NOT_SUPPORTED) {
-      mIsScbrSupported = false;
-      LOG(ERROR) << fn << ": SCBR not supported";
-    } else if (nfaStat == NFA_STATUS_OK) {
-      mIsScbrSupported = true;
-      mRoutingEvent.wait();
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << fn << ": Succeed to de-register system code";
-
-      reconfHceFNeeded = true;
-    } else {
-      LOG(ERROR) << fn << ": Fail to deregister system code";
-    }
-  }
-
-  if ((sysCodeRoute != -1) &&
-      ((mScRoutingConfigured == false) || (reconfHceFNeeded))) {
-    // Register System Code for routing
-    SyncEventGuard guard(mRoutingEvent);
-    tNFA_STATUS nfaStat = NFA_EeAddSystemCodeRouting(
-        mDefaultSysCode, sysCodeRoute,
-        mSecureNfcEnabled ? 0x01 : mDefaultSysCodePowerstate);
-    if (nfaStat == NFA_STATUS_NOT_SUPPORTED) {
-      mIsScbrSupported = false;
-      LOG(ERROR) << fn << ": SCBR not supported";
-    } else if (nfaStat == NFA_STATUS_OK) {
-      mIsScbrSupported = true;
-      mRoutingEvent.wait();
-    } else {
-      LOG(ERROR) << fn << ": Fail to register system code";
-    }
-  }
-
-  /**************************************************************/
-  /******************** Update techs route **********************/
-  /**************************************************************/
-
-  mSeTechMask = 0;
-  bool muteTechSet = false;
-
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; Number of EE is %d", fn, localEeInfo.num_ee);
-
-  for (uint8_t i = 0; i < localEeInfo.num_ee; i++) {
-    tNFA_HANDLE eeHandle = localEeInfo.ee_disc_info[i].ee_handle;
-    tNFA_TECHNOLOGY_MASK seTechMask = 0;
-
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; EE[%u] Handle: 0x%04x  techA: 0x%02x  techB: "
-        "0x%02x  techF: 0x%02x  techBprime: 0x%02x",
-        fn, i, eeHandle, localEeInfo.ee_disc_info[i].la_protocol,
-        localEeInfo.ee_disc_info[i].lb_protocol,
-        localEeInfo.ee_disc_info[i].lf_protocol,
-        localEeInfo.ee_disc_info[i].lbp_protocol);
-
-    int nfceeFullmask = 0x00;
-
-    /*** Mifare routing/Tech A ***/
-    if ((connectedMifareRoute != INVALID_ROUTE_VALUE) &&
-        (eeHandle == (connectedMifareRoute | NFA_HANDLE_GROUP_EE))) {
-      if ((localEeInfo.ee_disc_info[i].la_protocol & NFA_PROTOCOL_MASK_T2T) !=
-          0) {
-        seTechMask |= NFA_TECHNOLOGY_MASK_A;
-      }
-    }
-
-    if ((connectedDefaultOffHostRoute != 0) &&
-        (eeHandle == (connectedDefaultOffHostRoute | NFA_HANDLE_GROUP_EE))) {
-      // If MIFARE was not routed, and this
-      if (localEeInfo.ee_disc_info[i].la_protocol != 0) {
-        seTechMask |= NFA_TECHNOLOGY_MASK_A;
-
-        if ((localEeInfo.ee_disc_info[i].la_protocol & NFA_PROTOCOL_MASK_T2T) !=
-            0) {
-          nfceeFullmask = TECH_A_MIFARE;
-        }
-        if ((localEeInfo.ee_disc_info[i].la_protocol &
-             NFA_PROTOCOL_MASK_ISO_DEP) != 0) {
-          nfceeFullmask |= TECH_A_ISO_DEP;
-        }
-      }
-      if (localEeInfo.ee_disc_info[i].lb_protocol != 0) {
-        seTechMask |= NFA_TECHNOLOGY_MASK_B;
-        nfceeFullmask |= TECH_B_ISO_DEP;
-      }
-
-      if (seTechMask == 0x00) {
-        // Tech A/B not supproted by target NFCEE, will be routed to HCE
-        connectedDefaultOffHostRoute = 0x00;
-      }
-    }
-
-    if ((felicaRoute != 0) && (felicaRoute != -1) &&
-        (eeHandle == (felicaRoute | NFA_HANDLE_GROUP_EE))) {
-      if (localEeInfo.ee_disc_info[i].lf_protocol != 0)
-        seTechMask |= NFA_TECHNOLOGY_MASK_F;
-    }
-
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; seTechMask[%u]=0x%02x", fn, i, seTechMask);
-    if (seTechMask != 0x00) {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; Configuring tech mask 0x%02x on EE 0x%04x", fn,
-                          seTechMask, eeHandle);
-
-      SyncEventGuard guard(mRoutingEvent);
-      nfaStat = NFA_EeSetDefaultTechRouting(
-          eeHandle, seTechMask, mSecureNfcEnabled ? 0 : seTechMask, 0,
-          mSecureNfcEnabled ? 0 : seTechMask,
-          mSecureNfcEnabled ? 0 : seTechMask,
-          mSecureNfcEnabled ? 0 : seTechMask);
-      if (nfaStat == NFA_STATUS_OK) {
-        mRoutingEvent.wait();
-      } else {
-        LOG(ERROR) << fn << ": Failed to configure UICC technology routing.";
-      }
-
-      mSeTechMask |= seTechMask;
-    }
-
-    /*** Check if a tech shall be muted - only for HCI EE ***/
-    if (eeHandle == (connectedDefaultOffHostRoute | NFA_HANDLE_GROUP_EE)) {
-      if (NfcStExtensions::getInstance().getObserverMode()) {
-        NFA_SetMuteTech(false, false, false);
-        muteTechSet = true;
-      } else if (((eeHandle & 0x480) == 0x480) && (mMuteTechBitmap == 0) &&
-                 ((seTechMask &
-                   (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) != 0)) {
-        // if we are configuring the default route to HCI EE which supports A
-        // and/or B:
-        NFA_SetMuteTech((seTechMask & NFA_TECHNOLOGY_MASK_A) == 0,
-                        (seTechMask & NFA_TECHNOLOGY_MASK_B) == 0, false);
-      } else {
-        // other cases, we just follow mMuteTechBitmap
-        NFA_SetMuteTech(((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_A) != 0),
-                        ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_B) != 0),
-                        ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F) != 0));
-      }
-      muteTechSet = true;
-    }
-
-    /*** Special case: NFCEE only supports A for MIFARE protocol and B for
-       ISO-DEP
-        => remove type A for HCE in polling loop ***/
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; nfceeFullmask=0x%02x", fn, nfceeFullmask);
-
-    uint8_t config[NfcStExtensions::RF_CONFIG_ARRAY_SIZE];
-    int rfBitmap = NfcStExtensions::getInstance().getRfConfiguration(config);
-    bool isRfReconfNeeded = false;
-    // If HCE is enabled and NFCEE on to support A Mifare/B ISO-DEP
-    if (rfBitmap & (0x1 << NfcStExtensions::CE_IDX)) {
-      if ((nfceeFullmask == (TECH_B_ISO_DEP | TECH_A_MIFARE)) ||
-          (nfceeFullmask == TECH_A_MIFARE)) {
-        // Need to remove type A from HCE, if not yet done
-        if ((config[NfcStExtensions::CE_IDX] & NFA_TECHNOLOGY_MASK_A) != 0) {
-          config[NfcStExtensions::CE_IDX] &= ~NFA_TECHNOLOGY_MASK_A;
-          isRfReconfNeeded = true;
-        }
-      } else if (((config[NfcStExtensions::CE_IDX] & NFA_TECHNOLOGY_MASK_A) ==
-                  0) &&
-                 ((NFA_TECHNOLOGY_MASK_A & mHostListenTechMask) != 0)) {
-        // Need to restore type A in HCE if needed
-        config[NfcStExtensions::CE_IDX] |= NFA_TECHNOLOGY_MASK_A;
-        isRfReconfNeeded = true;
-      }
-    }
-
-    if (isRfReconfNeeded) {
-      NfcStExtensions::getInstance().setRfConfiguration(rfBitmap, config);
-    }
-  }
-
-  if (!muteTechSet) {
-    // ensure the mask is restored
-    NFA_SetMuteTech(((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_A) != 0),
-                    ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_B) != 0),
-                    ((mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F) != 0));
-  }
-
-  /**************************************************************/
-  /****************** Update A/B/F tech route *******************/
-  /************ to DH is not supported by UICC ******************/
-  /**************************************************************/
-  {
-    SyncEventGuard guard(mRoutingEvent);
-
-    // Route Nfc-A to host if we don't have a SE
-    tNFA_TECHNOLOGY_MASK techMask = NFA_TECHNOLOGY_MASK_A;
-    if ((NfcStExtensions::HCE_TECH_MASK & NFA_TECHNOLOGY_MASK_A) &&
-        ((mSeTechMask & NFA_TECHNOLOGY_MASK_A) == 0)) {
-      nfaStat = NFA_EeSetDefaultTechRouting(
-          NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
-      if (nfaStat == NFA_STATUS_OK)
-        mRoutingEvent.wait();
-      else
-        LOG(ERROR) << fn << ": Fail to set default tech routing for Nfc-A";
-    }
-
-    techMask = NFA_TECHNOLOGY_MASK_B;
-    if ((NfcStExtensions::HCE_TECH_MASK & NFA_TECHNOLOGY_MASK_B) &&
-        ((mSeTechMask & NFA_TECHNOLOGY_MASK_B) == 0)) {
-      nfaStat = NFA_EeSetDefaultTechRouting(
-          NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
-      if (nfaStat == NFA_STATUS_OK)
-        mRoutingEvent.wait();
-      else
-        LOG(ERROR) << fn << ": Fail to set default tech routing for Nfc-B";
-    }
-
-    // Route Nfc-F to host only if it is default route
-    techMask = NFA_TECHNOLOGY_MASK_F;
-    if ((felicaRoute == 0) ||
-        ((felicaRoute == -1) && (mMuteTechBitmap & NFA_TECHNOLOGY_MASK_F))) {
-      nfaStat = NFA_EeSetDefaultTechRouting(
-          NFC_DH_ID, techMask, 0, 0, mSecureNfcEnabled ? 0 : techMask, 0, 0);
-      if (nfaStat == NFA_STATUS_OK)
-        mRoutingEvent.wait();
-      else
-        LOG(ERROR) << fn << ": Fail to set default tech routing for Nfc-F";
-    }
-  }
-
-  // Update values for effective default routes
-  mConnectedDefaultOffHostRoute = connectedDefaultOffHostRoute;
-  mConnectedDefaultIsoDepRoute = connectedIsoDepRoute;
-  mConnectedDefaultFelicaRoute = felicaRoute;
-  mConnectedDefaultMifareRoute = connectedMifareRoute;
-  mConnectedDefaultScRoute = sysCodeRoute;
-  mConnectedDefaultAidRoute = connectedDefaultEe;
 }
 
 /*******************************************************************************
@@ -2211,12 +1872,37 @@ static void reconfLmrtNoTechCb(union sigval) {
   static const char fn[] = "StRoutingManager::reconfLmrtNoTechCb";
   StRoutingManager& routingManager = StRoutingManager::getInstance();
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+  LOG(DEBUG) << StringPrintf(
       "%s; timer elapsed, "
       "reconfiguring routing table with all tech removed",
       fn);
 
   routingManager.processEmptyDiscRedNtf();
+}
+
+/*******************************************************************************
+**
+** Function:        reconfLmrtNoTechCb
+**
+** Description:     call back function for timer started if DISC_REQ_NTF
+**                  removing all techs is received.
+**
+** Returns:         None
+**
+*******************************************************************************/
+static void reconfLmrtMepCb(union sigval) {
+  static const char fn[] = "StRoutingManager::reconfLmrtMepCb";
+  StRoutingManager& routingManager = StRoutingManager::getInstance();
+
+  LOG(DEBUG) << StringPrintf(
+      "%s; timer elapsed, reconfiguring routing table for MEP", fn);
+
+  if (!routingManager.mDeinitializing) {
+    routingManager.setEeInfoChangedFlag();
+    routingManager.notifyEeUpdated();
+  }
+
+  routingManager.mIsMepUpdating = false;
 }
 
 /*******************************************************************************
@@ -2269,57 +1955,58 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
   switch (event) {
     case NFA_EE_REGISTER_EVT: {
       SyncEventGuard guard(routingManager.mEeRegisterEvent);
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_REGISTER_EVT; status=%u", fn, eventData->ee_register);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REGISTER_EVT; status=%u", fn,
+                                 eventData->ee_register);
       routingManager.mEeRegisterEvent.notifyOne();
     } break;
 
     case NFA_EE_DEREGISTER_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_DEREGISTER_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_DEREGISTER_EVT; status=0x%X", fn,
+                                 eventData->status);
       routingManager.mReceivedEeInfo = false;
+      routingManager.mReceivedMepEeInfo = false;
       routingManager.mDeinitializing = false;
     } break;
 
     case NFA_EE_MODE_SET_EVT: {
       se.notifyModeSet((eventData->mode_set));
       SyncEventGuard guard(routingManager.mEeSetModeEvent);
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      LOG(DEBUG) << StringPrintf(
           "%s; NFA_EE_MODE_SET_EVT; status: 0x%04X  handle: 0x%04X  ", fn,
           eventData->mode_set.status, eventData->mode_set.ee_handle);
       routingManager.mEeSetModeEvent.notifyOne();
     } break;
 
     case NFA_EE_SET_TECH_CFG_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_SET_TECH_CFG_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_SET_TECH_CFG_EVT; status=0x%X", fn,
+                                 eventData->status);
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
 
     case NFA_EE_CLEAR_TECH_CFG_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_CLEAR_TECH_CFG_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_CLEAR_TECH_CFG_EVT; status=0x%X",
+                                 fn, eventData->status);
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
 
     case NFA_EE_SET_PROTO_CFG_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_SET_PROTO_CFG_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_SET_PROTO_CFG_EVT; status=0x%X",
+                                 fn, eventData->status);
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
 
     case NFA_EE_CLEAR_PROTO_CFG_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_CLEAR_PROTO_CFG_EVT; status=0x%X", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_CLEAR_PROTO_CFG_EVT; status=0x%X",
+                                 fn, eventData->status);
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
 
     case NFA_EE_STATUS_NTF_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      LOG(DEBUG) << StringPrintf(
           "%s; NFA_EE_STATUS_NTF_EVT; status: 0x%04X  nfcee_id: 0x%04X", fn,
           eventData->status_ntf.status,
           ((tNFA_EE_STATUS_NTF*)eventData)->nfcee_id);
@@ -2332,26 +2019,26 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
     case NFA_EE_ACTION_EVT: {
       tNFA_EE_ACTION& action = eventData->action;
       if (action.trigger == NFC_EE_TRIG_SELECT)
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        LOG(DEBUG) << StringPrintf(
             "%s; NFA_EE_ACTION_EVT; h=0x%X; trigger=select (0x%X)", fn,
             action.ee_handle, action.trigger);
       else if (action.trigger == NFC_EE_TRIG_APP_INIT) {
         tNFC_APP_INIT& app_init = action.param.app_init;
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        LOG(DEBUG) << StringPrintf(
             "%s; NFA_EE_ACTION_EVT; h=0x%X; trigger=app-init "
             "(0x%X); aid len=%u; data len=%u",
             fn, action.ee_handle, action.trigger, app_init.len_aid,
             app_init.len_data);
       } else if (action.trigger == NFC_EE_TRIG_RF_PROTOCOL)
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        LOG(DEBUG) << StringPrintf(
             "%s; NFA_EE_ACTION_EVT; h=0x%X; trigger=rf protocol (0x%X)", fn,
             action.ee_handle, action.trigger);
       else if (action.trigger == NFC_EE_TRIG_RF_TECHNOLOGY)
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        LOG(DEBUG) << StringPrintf(
             "%s; NFA_EE_ACTION_EVT; h=0x%X; trigger=rf tech (0x%X)", fn,
             action.ee_handle, action.trigger);
       else
-        DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+        LOG(DEBUG) << StringPrintf(
             "%s; NFA_EE_ACTION_EVT; h=0x%X; unknown trigger (0x%X)", fn,
             action.ee_handle, action.trigger);
       // Wallet may need to get this.
@@ -2359,8 +2046,10 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_DISCOVER_REQ_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_DISCOVER_REQ_EVT; status=0x%X; num ee=%u", __func__,
+      jboolean isMep1Info = false, isMep2Info = false, hadMep1 = false,
+               hadMep2 = false;
+      LOG(DEBUG) << StringPrintf(
+          "%s; NFA_EE_DISCOVER_REQ_EVT; status=0x%X; num ee=%u", fn,
           eventData->discover_req.status, eventData->discover_req.num_ee);
 
       // Check if ALL techs were removed. If so, wait for reconf NTF to update
@@ -2368,11 +2057,11 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
         if ((eventData->discover_req.ee_disc_info[i].la_protocol == 0) &&
             (eventData->discover_req.ee_disc_info[i].lb_protocol == 0) &&
             (eventData->discover_req.ee_disc_info[i].lf_protocol == 0)) {
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+          LOG(DEBUG) << StringPrintf(
               "%s; NFA_EE_DISCOVER_REQ_EVT; All techs removed for NFCEE "
               "0x%02X, "
               "wait 500ms for reconfiguration",
-              __func__, eventData->discover_req.ee_disc_info[i].ee_handle);
+              fn, eventData->discover_req.ee_disc_info[i].ee_handle);
 
           memcpy(&gTempEeInfo, &eventData->discover_req,
                  sizeof(routingManager.mEeInfo));
@@ -2380,16 +2069,70 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
           gTechReconfTimer.set(500, reconfLmrtNoTechCb);
           return;
         }
+        // Check if received RF_NFCEE_DISCOVERY_REQ_NTF contains info for MEP
+        if (eventData->discover_req.ee_disc_info[i].ee_handle ==
+            (NFA_HANDLE_GROUP_EE | 0x87)) {
+          isMep1Info = true;
+          // LOG(DEBUG) << StringPrintf(
+          //     "%s; NFA_EE_DISCOVER_REQ_EVT; Rx Information for MEP1",
+          //     __func__);
+        } else if (eventData->discover_req.ee_disc_info[i].ee_handle ==
+                   (NFA_HANDLE_GROUP_EE | 0x89)) {
+          isMep2Info = true;
+          // LOG(DEBUG) << StringPrintf(
+          //     "%s; NFA_EE_DISCOVER_REQ_EVT; Rx Information for MEP2",
+          //     __func__);
+        }
       }
 
       gTechReconfTimer.kill();
 
+      // Check if current stored data contains info for MEP
+      for (int i = 0; i < routingManager.mEeInfo.num_ee; i++) {
+        if (routingManager.mEeInfo.ee_disc_info[i].ee_handle ==
+            (NFA_HANDLE_GROUP_EE | 0x87)) {
+          hadMep1 = true;
+          // LOG(DEBUG) << StringPrintf(
+          //     "%s; NFA_EE_DISCOVER_REQ_EVT; Had Information for MEP1",
+          //     __func__);
+        }
+        if (routingManager.mEeInfo.ee_disc_info[i].ee_handle ==
+            (NFA_HANDLE_GROUP_EE | 0x89)) {
+          hadMep2 = true;
+          // LOG(DEBUG) << StringPrintf(
+          //     "%s; NFA_EE_DISCOVER_REQ_EVT; Had Information for MEP2",
+          //     __func__);
+        }
+      }
       SyncEventGuard guard(routingManager.mEeInfoEvent);
 
       sEeInfoMutex.lock();
       memcpy(&routingManager.mEeInfo, &eventData->discover_req,
              sizeof(routingManager.mEeInfo));
       sEeInfoMutex.unlock();
+      // We are rx series of MEP updates, wait before sending info to java
+      if (routingManager.mIsMepUpdating) {
+        LOG(DEBUG) << StringPrintf(
+            "%s; NFA_EE_DISCOVER_REQ_EVT; MEP update ongoing, do nothing",
+            __func__);
+        gMepReconfTimer.kill();
+        gMepReconfTimer.set(100, reconfLmrtMepCb);
+        return;
+      }
+      // If MEP was updated (something has changed)
+      if ((hadMep1 != isMep1Info) || (hadMep2 != isMep2Info)) {
+        LOG(DEBUG) << StringPrintf(
+            "%s; NFA_EE_DISCOVER_REQ_EVT; MEP update started", __func__);
+        // Notification is sent after timeout
+        if (routingManager.mReceivedMepEeInfo) {
+          // LOG(DEBUG) << StringPrintf(
+          //     "%s; NFA_EE_DISCOVER_REQ_EVT; MEP update postponed", __func__);
+          routingManager.mIsMepUpdating = true;
+          gMepReconfTimer.set(100, reconfLmrtMepCb);
+        }
+        routingManager.mReceivedMepEeInfo = true;
+        return;
+      }
 
       if (routingManager.mReceivedEeInfo && !routingManager.mDeinitializing) {
         routingManager.setEeInfoChangedFlag();
@@ -2400,51 +2143,50 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_NO_CB_ERR_EVT:
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_NO_CB_ERR_EVT  status=%u", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_NO_CB_ERR_EVT  status=%u", fn,
+                                 eventData->status);
       break;
 
     case NFA_EE_ADD_AID_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_ADD_AID_EVT  status=%u", fn, eventData->status);
-      SyncEventGuard guard(routingManager.mRoutingEvent);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_ADD_AID_EVT  status=%u", fn,
+                                 eventData->status);
+      SyncEventGuard guard(routingManager.mAidAddRemoveEvent);
       routingManager.mAidRoutingConfigured =
           (eventData->status == NFA_STATUS_OK);
-      routingManager.mRoutingEvent.notifyOne();
+      routingManager.mAidAddRemoveEvent.notifyOne();
     } break;
 
     case NFA_EE_ADD_SYSCODE_EVT: {
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_ADD_SYSCODE_EVT  status=%u", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_ADD_SYSCODE_EVT  status=%u", fn,
+                                 eventData->status);
     } break;
 
     case NFA_EE_REMOVE_SYSCODE_EVT: {
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_REMOVE_SYSCODE_EVT  status=%u", fn, eventData->status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REMOVE_SYSCODE_EVT  status=%u", fn,
+                                 eventData->status);
     } break;
 
     case NFA_EE_REMOVE_AID_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_REMOVE_AID_EVT  status=%u", fn, eventData->status);
-      SyncEventGuard guard(routingManager.mRoutingEvent);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REMOVE_AID_EVT  status=%u", fn,
+                                 eventData->status);
+      SyncEventGuard guard(routingManager.mAidAddRemoveEvent);
       routingManager.mAidRoutingConfigured =
           (eventData->status == NFA_STATUS_OK);
-      routingManager.mRoutingEvent.notifyOne();
+      routingManager.mAidAddRemoveEvent.notifyOne();
     } break;
 
     case NFA_EE_NEW_EE_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; NFA_EE_NEW_EE_EVT  h=0x%X; status=%u", fn,
-          eventData->new_ee.ee_handle, eventData->new_ee.ee_status);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_NEW_EE_EVT  h=0x%X; status=%u", fn,
+                                 eventData->new_ee.ee_handle,
+                                 eventData->new_ee.ee_status);
     } break;
 
     case NFA_EE_UPDATED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_UPDATED_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_UPDATED_EVT", fn);
       SyncEventGuard guard(routingManager.mEeUpdateEvent);
       routingManager.mEeUpdateEvent.notifyOne();
       routingManager.notifyDefaultRouteSet(
@@ -2457,37 +2199,32 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_PWR_AND_LINK_CTRL_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_PWR_AND_LINK_CTRL_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_PWR_AND_LINK_CTRL_EVT", fn);
       SyncEventGuard guard(routingManager.mEePwrAndLinkCtrlEvent);
       routingManager.mEePwrAndLinkCtrlEvent.notifyOne();
     } break;
 
     case NFA_EE_FORCE_ROUTING_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_FORCE_ROUTING_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_FORCE_ROUTING_EVT", fn);
       SyncEventGuard guard(routingManager.mEeForceRoutingEvent);
       routingManager.mEeForceRoutingEvent.notifyOne();
     } break;
 
     case NFA_EE_DISCOVER_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_DISCOVER_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_DISCOVER_EVT", fn);
       SyncEventGuard guard(routingManager.mEeDiscoverEvent);
       routingManager.mEeDiscoverEvent.notifyOne();
     } break;
 
     case NFA_EE_REMAINING_SIZE_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_EE_REMAINING_SIZE_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REMAINING_SIZE_EVT", fn);
       SyncEventGuard guard(routingManager.mEeRemaingLmrtSizeEvent);
       routingManager.mEeRemaingLmrtSizeEvent.notifyOne();
       routingManager.mRemainingLmrtSize = eventData->size;
     } break;
 
     default:
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; unknown event=%u ????", fn, event);
+      LOG(DEBUG) << StringPrintf("%s; unknown event=%u ????", fn, event);
       break;
   }
 }
@@ -2548,7 +2285,7 @@ int StRoutingManager::registerT3tIdentifier(uint8_t* t3tId, uint8_t t3tIdLen) {
       LOG(ERROR) << StringPrintf("%s; Fail to register system code on DH", fn);
       return NFA_HANDLE_INVALID;
     }
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+    LOG(DEBUG) << StringPrintf(
         "%s; Succeed to register system code on DH , systemCode = %X", fn,
         systemCode);
     // add handle and system code pair to the map
@@ -2579,7 +2316,7 @@ void StRoutingManager::deregisterT3tIdentifier(int handle) {
     tNFA_STATUS nfaStat = NFA_CeDeregisterFelicaSystemCodeOnDH(handle);
     if (nfaStat == NFA_STATUS_OK) {
       mRoutingEvent.wait();
-      DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+      LOG(DEBUG) << StringPrintf(
           "%s; Succeeded in deregistering NFC-F system on DH", fn);
     } else {
       LOG(ERROR) << StringPrintf("%s; Fail to deregister NFC-F system on DH",
@@ -2597,7 +2334,7 @@ void StRoutingManager::deregisterT3tIdentifier(int handle) {
         tNFA_STATUS nfaStat = NFA_EeRemoveSystemCodeRouting(systemCode);
         if (nfaStat == NFA_STATUS_OK) {
           mRoutingEvent.wait();
-          DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+          LOG(DEBUG) << StringPrintf(
               "%s; Succeeded in deregistering system Code on DH", fn);
         } else {
           LOG(ERROR) << StringPrintf("%s; Fail to deregister system Code on DH",
@@ -2629,38 +2366,32 @@ void StRoutingManager::nfcFCeCallback(uint8_t event,
 
   switch (event) {
     case NFA_CE_REGISTERED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_REGISTERED_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_REGISTERED_EVT", fn);
       routingManager.mNfcFOnDhHandle = eventData->ce_registered.handle;
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
     case NFA_CE_DEREGISTERED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_DEREGISTERED_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_DEREGISTERED_EVT", fn);
       SyncEventGuard guard(routingManager.mRoutingEvent);
       routingManager.mRoutingEvent.notifyOne();
     } break;
     case NFA_CE_ACTIVATED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_ACTIVATED_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_ACTIVATED_EVT", fn);
       routingManager.notifyActivated(NFA_TECHNOLOGY_MASK_F);
     } break;
     case NFA_CE_DEACTIVATED_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_DEACTIVATED_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_DEACTIVATED_EVT", fn);
       routingManager.notifyDeactivated(NFA_TECHNOLOGY_MASK_F);
     } break;
     case NFA_CE_DATA_EVT: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; NFA_CE_DATA_EVT", fn);
+      LOG(DEBUG) << StringPrintf("%s; NFA_CE_DATA_EVT", fn);
       tNFA_CE_DATA& ce_data = eventData->ce_data;
       routingManager.handleData(NFA_TECHNOLOGY_MASK_F, ce_data.p_data,
                                 ce_data.len, ce_data.status);
     } break;
     default: {
-      DLOG_IF(INFO, nfc_debug_enabled)
-          << StringPrintf("%s; unknown event=%u ????", fn, event);
+      LOG(DEBUG) << StringPrintf("%s; unknown event=%u ????", fn, event);
     } break;
   }
 }
@@ -2677,9 +2408,9 @@ void StRoutingManager::nfcFCeCallback(uint8_t event,
 **
 *******************************************************************************/
 bool StRoutingManager::setNfcSecure(bool enable) {
+  static const char fn[] = "RoutingManager::setNfcSecure";
   mSecureNfcEnabled = enable;
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; enable: %d", __func__, enable);
+  LOG(DEBUG) << StringPrintf("%s; enable: %d", fn, enable);
   NFA_SetNfcSecure(enable);
   setEeInfoChangedFlag();
   return true;
@@ -2702,8 +2433,8 @@ void StRoutingManager::eeSetPwrAndLinkCtrl(uint8_t config) {
     int connectedDefaultEe =
         StSecureElement::getInstance().getConnectedNfceeId(mOffHostRouteEse[0]);
 
-    DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-        "%s; nfceeId: 0x%02X, config: 0x%02X", fn, connectedDefaultEe, config);
+    LOG(DEBUG) << StringPrintf("%s; nfceeId: 0x%02X, config: 0x%02X", fn,
+                               connectedDefaultEe, config);
 
     if (connectedDefaultEe != 0) {
       SyncEventGuard guard(mEePwrAndLinkCtrlEvent);
@@ -2726,6 +2457,79 @@ void StRoutingManager::eeSetPwrAndLinkCtrl(uint8_t config) {
 
 /*******************************************************************************
 **
+** Function:        clearRoutingEntry
+**
+** Description:     Receive execution environment-related events from stack.
+**                  event: Event code.
+**                  eventData: Event data.
+**
+** Returns:         None
+**
+*******************************************************************************/
+void StRoutingManager::clearRoutingEntry(int clearFlags) {
+  static const char fn[] = "StRoutingManager::clearRoutingEntry";
+
+  LOG(DEBUG) << StringPrintf("%s; Enter . Clear flags = %d", fn, clearFlags);
+  tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
+
+  if (clearFlags & CLEAR_AID_ENTRIES) {
+    LOG(DEBUG) << StringPrintf("%s; clear all of aid based routing", fn);
+    uint8_t clearAID[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    uint8_t aidLen = 0x08;
+    StRoutingManager::getInstance().removeAidRouting(clearAID, aidLen);
+  }
+
+  if (clearFlags & CLEAR_PROTOCOL_ENTRIES) {
+    for (uint8_t i = 0; i < mEeInfo.num_ee; i++) {
+      tNFA_HANDLE eeHandle = mEeInfo.ee_disc_info[i].ee_handle;
+      {
+        SyncEventGuard guard(mRoutingEvent);
+        nfaStat =
+            NFA_EeClearDefaultProtoRouting(eeHandle, NFA_PROTOCOL_MASK_ISO_DEP);
+        if (nfaStat == NFA_STATUS_OK) {
+          mRoutingEvent.wait();
+        }
+      }
+    }
+
+    {
+      SyncEventGuard guard(mRoutingEvent);
+      nfaStat =
+          NFA_EeClearDefaultProtoRouting(NFC_DH_ID, NFA_PROTOCOL_MASK_ISO_DEP);
+      if (nfaStat == NFA_STATUS_OK) {
+        mRoutingEvent.wait();
+      }
+    }
+  }
+
+  if (clearFlags & CLEAR_TECHNOLOGY_ENTRIES) {
+    for (uint8_t i = 0; i < mEeInfo.num_ee; i++) {
+      tNFA_HANDLE eeHandle = mEeInfo.ee_disc_info[i].ee_handle;
+      {
+        SyncEventGuard guard(mRoutingEvent);
+        nfaStat = NFA_EeClearDefaultTechRouting(
+            eeHandle, (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B |
+                       NFA_TECHNOLOGY_MASK_F));
+        if (nfaStat == NFA_STATUS_OK) {
+          mRoutingEvent.wait();
+        }
+      }
+    }
+
+    {
+      SyncEventGuard guard(mRoutingEvent);
+      nfaStat = NFA_EeClearDefaultTechRouting(
+          NFC_DH_ID, (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B |
+                      NFA_TECHNOLOGY_MASK_F));
+      if (nfaStat == NFA_STATUS_OK) {
+        mRoutingEvent.wait();
+      }
+    }
+  }
+}
+
+/*******************************************************************************
+**
 ** Function:        setUserDefaultRoutesPref
 **
 ** Description:     Receive execution environment-related events from stack.
@@ -2741,7 +2545,7 @@ void StRoutingManager::setUserDefaultRoutesPref(int mifareRoute,
                                                 int abTechRoute, int scRoute,
                                                 int aidRoute) {
   static const char fn[] = "StRoutingManager::setUserDefaultRoutesPref";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+  LOG(DEBUG) << StringPrintf(
       "%s; mifareRoute: 0x%02X, isoDepRoute: 0x%02X, "
       "felicaRoute: 0x%02X, abTechRoute: 0x%02X, scRoute: 0x%02X, "
       "aidRoute: 0x%02X",
@@ -2769,7 +2573,7 @@ void StRoutingManager::setUserDefaultRoutesPref(int mifareRoute,
 
 /*******************************************************************************
 **
-** Function:        setMuteTech
+** Function:        setDiscoveryTech
 **
 ** Description:     Gets information about which tech are muted.
 **                  eventData: Event data.
@@ -2777,29 +2581,33 @@ void StRoutingManager::setUserDefaultRoutesPref(int mifareRoute,
 ** Returns:         None
 **
 *******************************************************************************/
-void StRoutingManager::setMuteTech(uint8_t bitmap) {
-  static const char fn[] = "StRoutingManager::setMuteTech";
+void StRoutingManager::setDiscoveryTech(int poll_mask, int listen_mask) {
+  static const char fn[] = "StRoutingManager::setDiscoveryTech";
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; bitmap: 0x%02X", fn, bitmap);
+  LOG(DEBUG) << StringPrintf("%s; poll_mask: 0x%X, listen_mask: 0x%X", fn,
+                             poll_mask, listen_mask);
 
-  mMuteTechBitmap = bitmap;
+  mDiscPollMask = poll_mask;
+  mDiscListenMask = listen_mask;
   setEeInfoChangedFlag();
 }
 
 /*******************************************************************************
 **
-** Function:        getMuteTech
+** Function:        getDiscoveryTech
 **
 ** Description:
 **
 ** Returns:         None
 **
 *******************************************************************************/
-uint8_t StRoutingManager::getMuteTech() {
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; bitmap: 0x%02X", __func__, mMuteTechBitmap);
-  return mMuteTechBitmap;
+void StRoutingManager::getDiscoveryTech(int* poll_mask, int* listen_mask) {
+  static const char fn[] = "StRoutingManager::getDiscoveryTech";
+  LOG(DEBUG) << StringPrintf(
+      "%s; mDiscPollMask: 0x%02X, mDiscListenMask: 0x%02X", fn, mDiscPollMask,
+      mDiscListenMask);
+  *poll_mask = mDiscPollMask;
+  *listen_mask = mDiscListenMask;
 }
 
 /*******************************************************************************
@@ -2831,9 +2639,9 @@ void StRoutingManager::deinitialize() {
 *******************************************************************************/
 int StRoutingManager::registerJniFunctions(JNIEnv* e) {
   static const char fn[] = "StRoutingManager::registerJniFunctions";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", fn);
+  LOG(DEBUG) << StringPrintf("%s", fn);
   return jniRegisterNativeMethods(
-      e, "com/android/nfcstm/cardemulation/AidRoutingManager", sMethods,
+      e, "com/android/nfcstm/cardemulation/RoutingOptionManager", sMethods,
       NELEM(sMethods));
 }
 
@@ -2964,11 +2772,10 @@ int StRoutingManager::
 *******************************************************************************/
 bool StRoutingManager::clearAidTable() {
   static const char fn[] = "StRoutingManager::clearAidTable";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
+  LOG(DEBUG) << StringPrintf("%s; enter", fn);
 
   if (mDeinitializing) {
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; De-initializing, exit", fn);
+    LOG(DEBUG) << StringPrintf("%s; De-initializing, exit", fn);
     return true;
   }
 
@@ -2980,6 +2787,8 @@ bool StRoutingManager::clearAidTable() {
   if (nfaStat == NFA_STATUS_OK) {
     mRoutingEvent.wait();
     mAidRoutingConfigured = false;
+    mWantedAidRouteOnUicc = false;
+    setEeInfoChangedFlag();
     return true;
   } else {
     LOG(ERROR) << StringPrintf("%s; failed to remove AID", fn);
@@ -2998,7 +2807,7 @@ bool StRoutingManager::clearAidTable() {
 *******************************************************************************/
 bool StRoutingManager::setSEFelicaCardEnable(bool status) {
   static const char fn[] = "StRoutingManager::setSEFelicaCardEnable";
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", fn);
+  LOG(DEBUG) << StringPrintf("%s; enter", fn);
 
   mIsSEFelicaCard = status;
   setEeInfoChangedFlag();
@@ -3041,7 +2850,7 @@ int StRoutingManager::checkIsoDepSupport(int route) {
   }
 
   // No tech A nor B support, route to DH
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
+  LOG(DEBUG) << StringPrintf(
       "%s; No ISO-DEP support for route: 0x%02X, route to DH", fn, route);
   return NFC_DH_ID;
 }
@@ -3056,17 +2865,18 @@ int StRoutingManager::checkIsoDepSupport(int route) {
 **
 *******************************************************************************/
 int StRoutingManager::getRemainingLmrtSize() {
+  static const char fn[] = "StRoutingManager::getRemainingLmrtSize";
   SyncEventGuard guard(mEeRemaingLmrtSizeEvent);
   tNFA_STATUS nfaStat = NFA_EeGetLmrtRemainingSize();
 
   if (nfaStat == NFA_STATUS_OK) {
     mEeRemaingLmrtSizeEvent.wait();
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; Remaining size: %d", __func__, mRemainingLmrtSize);
+    LOG(DEBUG) << StringPrintf("%s; Remaining size: %d", fn,
+                               mRemainingLmrtSize);
     return mRemainingLmrtSize;
   } else {
     LOG(ERROR) << StringPrintf("%s; Fail to call NFA_EeGetLmrtRemainingSize()",
-                               __func__);
+                               fn);
     return -1;
   }
 }
@@ -3081,7 +2891,8 @@ int StRoutingManager::getRemainingLmrtSize() {
 **
 *******************************************************************************/
 void StRoutingManager::setEeInfoChangedFlag() {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
+  static const char fn[] = "StRoutingManager::setEeInfoChangedFlag";
+  LOG(DEBUG) << StringPrintf("%s;", fn);
   sEeInfoChangedMutex.lock();
   mEeInfoChanged = true;
   sEeInfoChangedMutex.unlock();
@@ -3108,7 +2919,7 @@ uint8_t StRoutingManager::getDisconnectedUiccId() { return mDisconnectedUicc; }
 **
 *******************************************************************************/
 void StRoutingManager::setDisconnectedUiccId(uint8_t id) {
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; id = 0x%02X", __func__, id);
+  static const char fn[] = "StRoutingManager::setDisconnectedUiccId";
+  LOG(DEBUG) << StringPrintf("%s; id = 0x%02X", fn, id);
   mDisconnectedUicc = id;
 }

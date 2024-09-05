@@ -47,6 +47,7 @@ class StFwNtfManager {
   void actionNtfEnable(bool enable);
   void intfActivatedNtfEnable(bool enable);
   void notifyIntfActivatedEvent(uint8_t len, uint8_t* pdata);
+  void ceApduDataEnable(bool enable);
 
  private:
 #define DYN_SST_IDLE 0
@@ -82,6 +83,8 @@ class StFwNtfManager {
   bool mSendIntfActivatedNtfToUpper;
   bool mDynEnabled;
   bool mSendVsLogDataToUpper;
+  bool mSendCeApduDataToUpper;
+
   int mDynFwErr;
   int mDynRotated;
   uint32_t mDynFwTsT1Started;  // FW time reference for T1
@@ -94,6 +97,9 @@ class StFwNtfManager {
   int mMatchSelectState;
   uint32_t mMatchSelectLastFieldOffTs;
   uint8_t mMatchSelectPartialLastChainedByte;
+  int mCeApduMatchState;
+  uint8_t mCeApduMatchPartialLastChainedByte;
+
   // Variables for sending 1st Rx and
   // parameters rotation to service
   // only once between a field on and off, unless the values change
@@ -191,4 +197,6 @@ class StFwNtfManager {
   void rplAddOneEventLocked(uint8_t format, char type, uint8_t gain,
                             uint32_t ts);
   void matchStoreActionAid(uint8_t nfcee, uint8_t* aid, int len);
+  void matchCeApduData(uint8_t format, uint16_t data_len, uint8_t* p_data,
+                       bool last);
 };

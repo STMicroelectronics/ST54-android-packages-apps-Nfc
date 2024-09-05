@@ -20,11 +20,14 @@ import android.sysprop.NfcProperties;
 import android.util.Log;
 import android.util.SparseArray;
 import android.util.SparseBooleanArray;
+
+import androidx.annotation.VisibleForTesting;
+
 import java.util.ArrayList;
 import java.util.List;
 
 public class ForegroundUtils implements ActivityManager.OnUidImportanceListener {
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(true);
     private final String TAG = "ForegroundUtils";
     private final ActivityManager mActivityManager;
 
@@ -43,7 +46,8 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
         private static ForegroundUtils sInstance = null;
     }
 
-    private ForegroundUtils(ActivityManager am) {
+    @VisibleForTesting
+    public ForegroundUtils(ActivityManager am) {
         mActivityManager = am;
         try {
             mActivityManager.addOnUidImportanceListener(
@@ -106,7 +110,9 @@ public class ForegroundUtils implements ActivityManager.OnUidImportanceListener 
         }
     }
 
-    /** @return a list of UIDs currently in the foreground, or an empty list if none are found. */
+    /**
+     * @return a list of UIDs currently in the foreground, or an empty list if none are found.
+     */
     public List<Integer> getForegroundUids() {
         ArrayList<Integer> uids = new ArrayList<Integer>(mForegroundUids.size());
         synchronized (mLock) {

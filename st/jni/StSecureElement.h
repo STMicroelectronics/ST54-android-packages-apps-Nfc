@@ -215,6 +215,7 @@ class StSecureElement {
   void SeActivationLock();
   void SeActivationUnlock();
   int retrieveHciHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);
+  int retrieveMepHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);
   void resetEEInfo();
   uint8_t getSENfceeId(uint8_t host_id);
   int retrieveHostList(uint8_t* ptrHostList, uint8_t* ptrInfo);

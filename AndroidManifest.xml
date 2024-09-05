@@ -57,15 +57,18 @@
     <uses-permission android:name="android.permission.OVERRIDE_WIFI_CONFIG" />
     <uses-permission android:name="android.permission.DEVICE_POWER" />
     <uses-permission android:name="android.permission.ACCESS_VR_STATE"/>
-    <uses-permission android:name="android.permission.RESTRICTED_VR_ACCESS"/>
     <uses-permission android:name="android.permission.USER_ACTIVITY" />
-    <uses-permission android:name="android.permission.BIND_RESOLVER_RANKER_SERVICE" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.START_ACTIVITIES_FROM_BACKGROUND" />
-    <uses-permission android:name="android.permission.NETWORK_SETTINGS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SUBSCRIBE_TO_KEYGUARD_LOCKED_STATE" />
+    <uses-permission android:name="android.permission.SHOW_CUSTOMIZED_RESOLVER" />
+    <uses-permission android:name="android.permission.MANAGE_ROLE_HOLDERS" />
+    <uses-permission android:name="android.permission.OBSERVE_ROLE_HOLDERS"/>
+    <uses-permission android:name="android.permission.DUMP"/>
+    <uses-permission android:name="android.permission.QUERY_CLONED_APPS"/>
+    <uses-permission android:name="android.permission.READ_PRIVILEGED_PHONE_STATE"/>
 
     <application android:name=".NfcApplication"
                  android:icon="@drawable/icon"
@@ -73,6 +76,7 @@
                  android:theme="@android:style/Theme.Material.Light"
                  android:persistent="true"
                  android:persistentWhenFeatureAvailable="android.hardware.nfc.any"
+                 android:restoreAnyVersion="true"
                  android:backupAgent="com.android.nfcstm.NfcBackupAgent"
                  android:killAfterRestore="false"
                  android:usesCleartextTraffic="false"
@@ -129,6 +133,10 @@
         <activity android:name=".ConfirmConnectToWifiNetworkActivity"
             android:finishOnCloseSystemDialogs="true"
             android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:noHistory="true"
+        />
+        <activity android:name=".NfcEnableAllowlistActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:noHistory="true"
         />

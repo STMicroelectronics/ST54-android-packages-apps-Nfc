@@ -26,11 +26,6 @@
 
 #include "JavaClassConstants.h"
 
-#ifdef DLOG_IF
-#undef DLOG_IF
-#define DLOG_IF LOG_IF
-#endif
-
 #define TARGET_TYPE_V 5
 // PROP_RAW_RF_MODE_AUTH_CMD
 #define PROP_AUTH_RF_RAW_MODE_CMD 0x17
@@ -59,7 +54,7 @@ extern jmethodID gCachedNfcManagerNotifyStLogData;
 extern jmethodID gCachedNfcManagerNotifyActionNtf;
 extern jmethodID gCachedNfcManagerNotifyIntfActivatedNtf;
 extern jmethodID gCachedNfcManagerNotifyRawAuthStatus;
-extern jmethodID gCachedNfcManagerNotifyDetectionFOD;
+extern jmethodID gCachedNfcManagerNotifyCeApduData;
 
 extern jmethodID gCachedNfcManagerNotifyPollingLoopData;
 }  // namespace android

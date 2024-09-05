@@ -27,6 +27,7 @@ import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.graphics.drawable.Drawable;
 import android.nfc.NfcAdapter;
+import android.nfc.cardemulation.ApduServiceInfo;
 import android.nfc.cardemulation.CardEmulation;
 import android.os.Bundle;
 import android.os.UserHandle;
@@ -41,10 +42,12 @@ import android.widget.BaseAdapter;
 import android.widget.ImageView;
 import android.widget.ListView;
 import android.widget.TextView;
+
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+
 import com.google.android.material.bottomsheet.BottomSheetBehavior;
-import com.st.android.nfc_extensions.StApduServiceInfo;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -82,7 +85,7 @@ public class AppChooserActivity extends AppCompatActivity
     protected void onCreate(
             Bundle savedInstanceState,
             String category,
-            ArrayList<StApduServiceInfo> options,
+            ArrayList<ApduServiceInfo> options,
             ComponentName failedComponent) {
 
         super.onCreate(savedInstanceState);
@@ -171,7 +174,7 @@ public class AppChooserActivity extends AppCompatActivity
     protected void onCreate(Bundle savedInstanceState) {
         if (DBG) Log.d(TAG, "onCreate()");
         Intent intent = getIntent();
-        ArrayList<StApduServiceInfo> services =
+        ArrayList<ApduServiceInfo> services =
                 intent.getParcelableArrayListExtra(EXTRA_APDU_SERVICES);
         String category = intent.getStringExtra(EXTRA_CATEGORY);
         ComponentName failedComponent = intent.getParcelableExtra(EXTRA_FAILED_COMPONENT);
@@ -194,13 +197,13 @@ public class AppChooserActivity extends AppCompatActivity
     }
 
     final class DisplayAppInfo {
-        StApduServiceInfo serviceInfo;
+        ApduServiceInfo serviceInfo;
         CharSequence displayLabel;
         Drawable displayIcon;
         Drawable displayBanner;
 
         public DisplayAppInfo(
-                StApduServiceInfo serviceInfo, CharSequence label, Drawable icon, Drawable banner) {
+                ApduServiceInfo serviceInfo, CharSequence label, Drawable icon, Drawable banner) {
             this.serviceInfo = serviceInfo;
             displayIcon = icon;
             displayLabel = label;
@@ -213,14 +216,14 @@ public class AppChooserActivity extends AppCompatActivity
         private final boolean mIsPayment;
         private List<DisplayAppInfo> mList;
 
-        public ListAdapter(Context context, ArrayList<StApduServiceInfo> services) {
+        public ListAdapter(Context context, ArrayList<ApduServiceInfo> services) {
             mInflater = context.getSystemService(LayoutInflater.class);
             // For each component, get the corresponding app name and icon
             PackageManager pm = getPackageManager();
             mList = new ArrayList<DisplayAppInfo>();
             mIsPayment = CardEmulation.CATEGORY_PAYMENT.equals(mCategory);
-            for (StApduServiceInfo service : services) {
-                CharSequence label = service.getGsmaDescription(pm);
+            for (ApduServiceInfo service : services) {
+                CharSequence label = service.getDescription();
                 if (label == null) label = service.loadLabel(pm);
 
                 Drawable icon =

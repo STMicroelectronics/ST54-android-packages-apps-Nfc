@@ -18,7 +18,7 @@ package com.android.nfcstm;
 
 import android.sysprop.NfcProperties;
 import android.util.Log;
-import androidx.annotation.VisibleForTesting;
+
 import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.Locale;
@@ -26,7 +26,7 @@ import java.util.Vector;
 
 /** Parse the Routing Table from the last backup lmrt cmd and dump it with a clear typography */
 public class RoutingTableParser {
-    static final boolean DBG = NfcProperties.debug_enabled().orElse(false);
+    static final boolean DBG = NfcProperties.debug_enabled().orElse(true);
     private static final String TAG = "RoutingTableParser";
     private static int sRoutingTableSize = 0;
     private static int sRoutingTableMaxSize = 0;
@@ -192,7 +192,7 @@ public class RoutingTableParser {
     }
 
     /** Check commit status by inputting type and entry */
-    @VisibleForTesting
+    // @VisibleForTesting
     public int getCommitStatus(byte type, byte[] entry) {
         if (!validateEntryInfo(type, entry)) return STATS_NOT_FOUND;
 

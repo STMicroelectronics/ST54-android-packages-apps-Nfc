@@ -90,20 +90,12 @@
     <!-- Title of the dialog -->
     <string name="title_confirm_url_open">Open link?</string>
     <!-- Summary text appearing before the URL -->
-    <string name="summary_confirm_url_open" product="tablet">Your tablet received a link through NFC:</string>
-    <string name="summary_confirm_url_open" product="default">Your phone received a link through NFC:</string>
+    <string name="summary_confirm_url_open">Your phone received a link through NFC:</string>
+    <!-- Summary text appearing before the URL, for tablet -->
+    <string name="summary_confirm_url_open_tablet">Your tablet received a link through NFC:</string>
     <!-- Label for the button which causes the URL to be opened -->
     <string name="action_confirm_url_open">Open link</string>
 
-
-    <string name="aid_routing_overflow">NFC Service \'%s\' is over the limit size. Change the
-        default status can make it work.
-    </string>
-    <string name="aid_routing_overflow_default">NFC services are over the limit size. Change the
-        default status can make it work.
-    </string>
-    <string name="aid_routing_overflow_change">Change</string>
-    <string name="aid_routing_overflow_cancel">Cancel</string>
     <!-- Toast string informing the user that NFC tag read failure occurs -->
     <string name="tag_read_error">NFC read error. Try again.</string>
     <!-- Toast string informing the user that no application can handle the NFC tag -->
@@ -116,4 +108,8 @@
     <string name="nfc_logging_alert_title">NFC data is being recorded</string>
     <!-- Notification message string informing the user that NFC data is being recorded -->
     <string name="nfc_logging_alert_message">Tap to stop recording.</string>
+    <!-- Title of the dialog to allow the package to enable NFC -->
+    <string name="title_package_enabling_nfc">Allow <xliff:g id="pkg">%1$s</xliff:g> to enable NFC?</string>
+    <string name="enable_nfc_yes">Yes</string>
+    <string name="enable_nfc_no">No</string>
 </resources>

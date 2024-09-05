@@ -35,6 +35,7 @@ import android.os.ParcelUuid;
 import android.os.Parcelable;
 import android.os.RemoteException;
 import android.util.Log;
+
 import java.util.Set;
 
 public class PeripheralHandoverService extends Service
@@ -143,7 +144,7 @@ public class PeripheralHandoverService extends Service
         mNfcAdapter = NfcAdapter.getDefaultAdapter(getApplicationContext());
 
         IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
-        registerReceiver(mBluetoothStatusReceiver, filter);
+        registerReceiver(mBluetoothStatusReceiver, filter, Context.RECEIVER_EXPORTED);
     }
 
     @Override

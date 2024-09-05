@@ -93,12 +93,6 @@ class NfcStExtensions {
   static const uint8_t UICC_HOST_ID = 0x02;
   static const uint8_t ESE_HOST_ID = 0xC0;
 
-  static const uint8_t READER_IDX = 0;
-  static const uint8_t CE_IDX = 1;
-  static const uint8_t P2P_LISTEN_IDX = 2;
-  static const uint8_t P2P_POLL_IDX = 3;
-  static const uint8_t RF_CONFIG_ARRAY_SIZE = 4;
-
   static const uint8_t DH_IDX = 0;
   static const uint8_t UICC_IDX = 1;
   static const uint8_t ESE_IDX = 2;
@@ -132,6 +126,7 @@ class NfcStExtensions {
   int getCustomerData(uint8_t* customerData);
 
   void setReaderMode(bool enabled);
+  bool getReaderMode();
 
   /*******************************************************************************
   **
@@ -260,18 +255,6 @@ class NfcStExtensions {
 
   /*******************************************************************************
    **
-   ** Function:        setRfConfiguration
-   **
-   ** Description:     Reconfigures the RF_DISCOVERY with the given parameters
-   **                  Is part of ST Extensions.
-   **
-   ** Returns:         None.
-   **
-   *******************************************************************************/
-  void setRfConfiguration(int modeBitmap, uint8_t* techArray);
-
-  /*******************************************************************************
-   **
    ** Function:        nfaConnectionCallback
    **
    ** Description:     Handles callbacks for RF reconfiguration related events.
@@ -291,7 +274,7 @@ class NfcStExtensions {
    ** Returns:         None.
    **
    *******************************************************************************/
-  int getRfConfiguration(uint8_t* techArray);
+  void getRfConfiguration(uint8_t* pollMask, uint8_t* discMask);
 
   /*******************************************************************************
    **
@@ -430,30 +413,6 @@ class NfcStExtensions {
                                                     uint8_t host_id);
 
   /*******************************************************************************
-  **
-  ** Function:        setP2pPausedStatus
-  **
-  ** Description:     sets the variable mIsP2pPaused (true, p2p is paused,
-  **                  false, p2p is not paused)
-  **
-  ** Returns:         None
-  **
-  *******************************************************************************/
-  void setP2pPausedStatus(bool status);
-
-  /*******************************************************************************
-  **
-  ** Function:        getP2pPausedStatus
-  **
-  ** Description:     gets the variable mIsP2pPaused
-  **
-  ** Returns:         (true, p2p is paused,
-  **                  false, p2p is not paused)
-  **
-  *******************************************************************************/
-  bool getP2pPausedStatus();
-
-  /*******************************************************************************
    **
    ** Function:        EnableSE
    **
@@ -581,6 +540,11 @@ class NfcStExtensions {
 
   void setDtaConfig(tHAL_NFC_ENTRY*);
 
+  // LPTD assist - start block
+  bool getLptdAssist();
+  void setLptdAssist(bool status);
+  // LPTD assist - end block
+
  private:
   static const uint8_t OID_ST_VS_CMD = 0x2;
   static const uint8_t OID_ST_TEST_CMD = 0x3;
@@ -616,9 +580,6 @@ class NfcStExtensions {
   bool mWaitingForDmEvent;
   SyncEvent mNfaDmEventPollEnabled;
   SyncEvent mNfaDmEventPollDisabled;
-  SyncEvent mNfaDmEventP2pPaused;
-  SyncEvent mNfaDmEventP2pResumed;
-  SyncEvent mNfaDmEventP2pListen;
   SyncEvent mNfaDmEventListenDisabled;
   SyncEvent mNfaDmEventListenEnabled;
   SyncEvent mNfaDmEventCeRegistered;
@@ -633,7 +594,6 @@ class NfcStExtensions {
   tJNI_ID_MGMT_INFO mIdMgmtInfo;
   uint8_t mFwVersion[FW_VERSION_SIZE];
   uint16_t mRspSize;
-  tJNI_RF_CONFIG mRfConfig;
   uint8_t mTargetHostId;
   bool mCeOnSwitchOffState;
   tJNI_NFCC_CONFIG mNfccConfig;
@@ -652,8 +612,6 @@ class NfcStExtensions {
   int mDesiredScreenOffPowerState;  // read from .conf file; 0=power-off-sleep;
                                     // 1=full power; 2=CE4 power
 
-  bool mIsP2pPaused;
-
   uint16_t mRxHciDataLen;
   uint8_t mRxHciData[1024];
   uint8_t mCreatedPipeId;
@@ -665,15 +623,10 @@ class NfcStExtensions {
   void StHandleDetectionFOD(uint8_t FodReason);
 
   int mHostListenTechMask;
+  int mConfPollTechMask;
 
   SyncEvent mDynRotateFieldEvt;
   bool mDynRotateFieldSts;
-
-  // Constants for SetMuteTech
-#define ST_CE_MUTE_A 1
-#define ST_CE_MUTE_B 2
-#define ST_CE_MUTE_F 4
-#define ST_CE_MUTE_DISCOVERY 8
 
   uint8_t mRawRfPropStatus;
   void StHandleVsRawAuthNtf(uint16_t data_len, uint8_t* p_data);
@@ -686,6 +639,11 @@ class NfcStExtensions {
   bool needUnmuteTechForObserverMode();
 
   static void notifyRestart();
+
+  // LPTD assist - start block
+  static void lptdAssistSeq();
+  bool mIsLptdAssist;
+  // LPTD assist - end block
 
   /*******************************************************************************
    **

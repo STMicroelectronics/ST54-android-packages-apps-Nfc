@@ -14,8 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <cutils/properties.h>
 #include <errno.h>
 #include <nativehelper/ScopedLocalRef.h>
@@ -30,8 +31,6 @@
 #include "nfc_config.h"
 
 using android::base::StringPrintf;
-
-extern bool nfc_debug_enabled;
 
 namespace android {
 
@@ -58,7 +57,7 @@ static bool sSeEnabledForApduGate = false;
 *******************************************************************************/
 static jint stNativeNfcSecureElement_doOpenSecureElementConnection(JNIEnv*,
                                                                    jobject) {
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; enter", __func__);
+  LOG(INFO) << StringPrintf("%s; enter", __func__);
   bool stat = true;
   jint secElemHandle = EE_ERROR_INIT;
   StSecureElement& se = StSecureElement::getInstance();
@@ -76,8 +75,8 @@ static jint stNativeNfcSecureElement_doOpenSecureElementConnection(JNIEnv*,
         sSeEnabledForApduGate = true;
       }
     } else {
-      LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-          "%s; not enabling %02hhx, already connected", __func__, nfceeId);
+      LOG(INFO) << StringPrintf("%s; not enabling %02hhx, already connected",
+                                __func__, nfceeId);
     }
   }
 
@@ -92,8 +91,8 @@ static jint stNativeNfcSecureElement_doOpenSecureElementConnection(JNIEnv*,
   }
 
   se.SeActivationUnlock();
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; exit; return handle=0x%X", __func__, secElemHandle);
+  LOG(INFO) << StringPrintf("%s; exit; return handle=0x%X", __func__,
+                            secElemHandle);
   return secElemHandle;
 }
 
@@ -111,8 +110,7 @@ static jint stNativeNfcSecureElement_doOpenSecureElementConnection(JNIEnv*,
 *******************************************************************************/
 static jboolean stNativeNfcSecureElement_doDisconnectSecureElementConnection(
     JNIEnv*, jobject, jint handle) {
-  LOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s; enter; handle=0x%04x", __func__, handle);
+  LOG(INFO) << StringPrintf("%s; enter; handle=0x%04x", __func__, handle);
   bool stat = false;
 
   StSecureElement& se = StSecureElement::getInstance();
@@ -127,7 +125,7 @@ static jboolean stNativeNfcSecureElement_doDisconnectSecureElementConnection(
     sSeEnabledForApduGate = false;
   }
   se.SeActivationUnlock();
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s; exit", __func__);
+  LOG(INFO) << StringPrintf("%s; exit", __func__);
   return stat ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -155,8 +153,8 @@ static jbyteArray stNativeNfcSecureElement_doTransceive(JNIEnv* e, jobject,
                                 // timeout
   ScopedByteArrayRW bytes(e, data);
 
-  LOG_IF(INFO, nfc_debug_enabled) << StringPrintf(
-      "%s; enter; handle=0x%X; buf len=%zu", __func__, handle, bytes.size());
+  LOG(INFO) << StringPrintf("%s; enter; handle=0x%X; buf len=%zu", __func__,
+                            handle, bytes.size());
   StSecureElement::getInstance().transceive(
       reinterpret_cast<uint8_t*>(&bytes[0]), bytes.size(), recvBuffer,
       recvBufferMaxSize, recvBufferActualSize, timeout);

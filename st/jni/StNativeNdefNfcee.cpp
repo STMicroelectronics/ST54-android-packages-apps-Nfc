@@ -14,15 +14,14 @@
  * limitations under the License.
  */
 
+#include <android-base/logging.h>
 #include <android-base/stringprintf.h>
-#include <base/logging.h>
 #include <nativehelper/ScopedLocalRef.h>
 #include <nativehelper/ScopedPrimitiveArray.h>
 #include "StNfcJni.h"
 #include "StNdefNfcee.h"
 
 using android::base::StringPrintf;
-extern bool nfc_debug_enabled;
 extern SyncEvent gIsReconfiguringDiscovery;
 
 namespace android {
@@ -80,16 +79,14 @@ static jboolean StNativeNdefNfcee_dowriteNdefData(JNIEnv* e, jobject,
     return -1;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled)
-      << StringPrintf("%s;  file:%02X%02X length:%d", __func__, fileBuf[0],
-                      fileBuf[1], dataBufLen);
+  LOG(DEBUG) << StringPrintf("%s;  file:%02X%02X length:%d", __func__,
+                             fileBuf[0], fileBuf[1], dataBufLen);
 
   /* stop discovery */
   gIsReconfiguringDiscovery.start();
   if (isDiscoveryStarted()) {
     // Stop RF Discovery if we were polling
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; stop discovery reconfiguring", __func__);
+    LOG(DEBUG) << StringPrintf("%s; stop discovery reconfiguring", __func__);
     startRfDiscovery(false);
     wasStopped = true;
   }
@@ -101,8 +98,7 @@ static jboolean StNativeNdefNfcee_dowriteNdefData(JNIEnv* e, jobject,
   /* restart discovery */
   if (wasStopped) {
     // start discovery
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; reconfigured start discovery", __func__);
+    LOG(DEBUG) << StringPrintf("%s; reconfigured start discovery", __func__);
     startRfDiscovery(true);
   }
   gIsReconfiguringDiscovery.end();
@@ -135,7 +131,7 @@ static jbyteArray StNativeNdefNfcee_doreadNdefData(JNIEnv* e, jobject o,
     return NULL;
   }
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
+  LOG(DEBUG) << StringPrintf("%s;", __func__);
 
   fileMaxLen = StNdefNfcee::getInstance().getFileCapacity(fileBuf);
 
@@ -165,8 +161,7 @@ static jbyteArray StNativeNdefNfcee_doreadNdefData(JNIEnv* e, jobject o,
       return result;
     }
   } else {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Reading File Content failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Reading File Content failed", __func__);
   }
 
   free(p);
@@ -193,7 +188,7 @@ static jboolean StNativeNdefNfcee_dolockNdefData(JNIEnv* e, jobject o,
       const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&fileBytes[0]));
   bool rslt = false;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
+  LOG(DEBUG) << StringPrintf("%s;", __func__);
 
   rslt = StNdefNfcee::getInstance().lockFile(fileBuf, lock);
 
@@ -217,7 +212,7 @@ static jboolean StNativeNdefNfcee_isLockedNdefData(JNIEnv* e, jobject o,
       const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(&fileBytes[0]));
   bool rslt = false;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
+  LOG(DEBUG) << StringPrintf("%s;", __func__);
 
   rslt = StNdefNfcee::getInstance().isLockedNdefData(fileBuf);
 
@@ -246,8 +241,7 @@ static jboolean StNativeNdefNfcee_doclearNdefData(JNIEnv* e, jobject o,
   gIsReconfiguringDiscovery.start();
   if (isDiscoveryStarted()) {
     // Stop RF Discovery if we were polling
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; stop discovery reconfiguring", __func__);
+    LOG(DEBUG) << StringPrintf("%s; stop discovery reconfiguring", __func__);
     startRfDiscovery(false);
     wasStopped = true;
   }
@@ -257,8 +251,7 @@ static jboolean StNativeNdefNfcee_doclearNdefData(JNIEnv* e, jobject o,
   /* restart discovery */
   if (wasStopped) {
     // start discovery
-    DLOG_IF(INFO, nfc_debug_enabled)
-        << StringPrintf("%s; reconfigured start discovery", __func__);
+    LOG(DEBUG) << StringPrintf("%s; reconfigured start discovery", __func__);
     startRfDiscovery(true);
   }
   gIsReconfiguringDiscovery.end();
@@ -281,7 +274,7 @@ static jbyteArray StNativeNdefNfcee_doReadT4tCcFile(JNIEnv* e, jobject o) {
   uint16_t recvBufferActualSize = 0;
   bool rslt = false;
 
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s;", __func__);
+  LOG(DEBUG) << StringPrintf("%s;", __func__);
 
   rslt = StNdefNfcee::getInstance().readAndParseCC(recvBuffer,
                                                    &recvBufferActualSize);
@@ -295,8 +288,8 @@ static jbyteArray StNativeNdefNfcee_doReadT4tCcFile(JNIEnv* e, jobject o) {
       return result;
     }
   } else {
-    DLOG_IF(ERROR, nfc_debug_enabled)
-        << StringPrintf("%s; Reading Capability Container failed", __func__);
+    LOG(ERROR) << StringPrintf("%s; Reading Capability Container failed",
+                               __func__);
   }
 
   return nullptr;
@@ -327,7 +320,7 @@ static JNINativeMethod gMethods[] = {
 **
 *******************************************************************************/
 int register_com_android_nfc_NativeNdefNfcee(JNIEnv* e) {
-  DLOG_IF(INFO, nfc_debug_enabled) << StringPrintf("%s", __func__);
+  LOG(DEBUG) << StringPrintf("%s", __func__);
   return jniRegisterNativeMethods(e, gNativeNdefNfceeClassName, gMethods,
                                   NELEM(gMethods));
 }

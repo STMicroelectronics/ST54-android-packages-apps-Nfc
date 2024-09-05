@@ -1,57 +1,142 @@
 genrule {
     name: "statslog-st-Nfc-java-gen",
     tools: ["stats-log-api-gen"],
-    cmd: "$(location stats-log-api-gen) --java $(out) --module nfc --javaPackage com.android.nfcstm"
-        + " --javaClass NfcStatsLog",
+    cmd: "$(location stats-log-api-gen) --java $(out) --module nfc --javaPackage com.android.nfcstm" +
+        " --javaClass NfcStatsLog",
     out: ["com/android/nfcstm/NfcStatsLog.java"],
 }
 
+/*java_library {
+    name: "bluetooth-protos-st-nfc-enums-java-gen",
+    installable: false,
+    proto: {
+        type: "stream",
+    },
+    srcs: [
+        ":srcs_bluetooth_protos_nfc",
+    ],
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.nfcstmservices",
+    ],
+    min_sdk_version: "current",
+    sdk_version: "module_current",
+}
+*/
+java_defaults {
+    name: "Nfc_StDefaults",
+    overrides: [
+        "Nfc",
+        "NfcNciDefaults",
+    ],
+    owner: "st",
+    system_ext_specific: true,
+    static_libs: [
+        "android.se.omapi-V1-java",
+        "androidx.annotation_annotation",
+        "androidx.appcompat_appcompat",
+        // "bluetooth-protos-st-nfc-enums-java-gen",
+        "com.google.android.material_material",
+        "modules-utils-fastxmlserializer",
+        "modules-utils-shell-command-handler",
+        "PlatformProperties",
+        "nfc-event-log-proto-st",
+        "st_nfc_flags_lib",
+    ],
+    privileged: true,
+    optimize: {
+        proguard_flags_files: ["proguard.flags"],
+    },
+    jarjar_rules: "jarjar-rules.txt",
+    privapp_allowlist: ":privapp_allowlist_com.android.nfcstm.xml",
+}
 
 //########################################
 //# ST Configuration
 //########################################
 android_app {
     name: "Nfc_st",
-
-    srcs: ["src/**/*.java"] + ["st/**/*.java"] + ["st_dta/**/*.java"] + [
-        "nci/src/com/android/nfcstm/dhimpl/NativeLlcpConnectionlessSocket.java",
-        "nci/src/com/android/nfcstm/dhimpl/NativeLlcpServiceSocket.java",
-        "nci/src/com/android/nfcstm/dhimpl/NativeLlcpSocket.java",
-        "nci/src/com/android/nfcstm/dhimpl/NativeP2pDevice.java",
-        ":statslog-st-Nfc-java-gen",
-    ],
-
-    owner: "st",
-    overrides: [
-        "Nfc",
-        "NfcNci",
-    ],
-    platform_apis: true,
+    defaults: ["Nfc_StDefaults"],
+    //    platform_apis: true,
     certificate: "platform",
-    system_ext_specific: true,
+    sdk_version: "core_platform",
+    srcs: [
+        ":st-nfc-sources",
+        "shim_src/non_apex/**/*.java",
+    ],
+    uses_libs: [
+        "com.st.android.nfc_extensions",
+    ],
+    libs: [
+        // order matters: classes in framework-nfc are resolved before framework, meaning
+        // @hide APIs in framework-nfc are resolved before @SystemApi stubs in framework
+        "framework-nfc.impl",
+        "framework",
 
-    jni_libs: [
-        "libstnfc_nci_jni",
+        // if sdk_version="" this gets automatically included, but here we need to add manually.
+        "framework-res",
+        "com.st.android.nfc_extensions",
+    ],
+    jni_libs: ["libstnfc_nci_jni"],
+    required: [
+        // Provide a default libnfc-nci.conf in /system/etc for devices that
+        // does not ship one in /product
+        "libnfc-nci.conf-default",
+    ],
+}
+
+// NCI Configuration embedded in NFC apex.
+// This version compiles against SDK API's.
+android_app {
+    name: "Nfc_StApex",
+    defaults: ["Nfc_StDefaults"],
+    min_sdk_version: "current",
+    sdk_version: "module_current",
+    certificate: "nfc",
+    srcs: [
+        ":st-nfc-sources",
+        "shim_src/apex/**/*.java",
     ],
 
     libs: [
-        "com.st.android.nfc_extensions",
+        "framework-annotations-lib",
+        "framework-bluetooth",
+        "framework-configinfrastructure",
+        "framework-nfc.impl",
+        "framework-permission-s",
+        "framework-permission",
+        "framework-statsd.stubs.module_lib",
+        "framework-wifi",
+        "android.nfc.flags-aconfig-java",
+        "android.permission.flags-aconfig-java-export",
+        "android.service.chooser.flags-aconfig-java",
+        "unsupportedappusage",
     ],
-
-	uses_libs: [
-		"com.st.android.nfc_extensions"
-	],
-
-    static_libs: [
-        "android.se.omapi-V1-java",
-        "androidx.annotation_annotation",
-        "androidx.appcompat_appcompat",
-        "com.google.android.material_material",
-        "PlatformProperties",
+    // prevent NfcNciApex from using product-specific resources
+    aaptflags: ["--product default"],
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.nfcstmservices",
     ],
-
-    optimize: {
-        proguard_flags_files: ["proguard.flags"],
+    lint: {
+        baseline_filename: "lint-baseline.xml",
     },
-    jarjar_rules: "jarjar-rules.txt",
+}
+
+filegroup {
+    name: "st-nfc-sources",
+    srcs: [
+        "src/**/*.java",
+        "st/**/*.java",
+        ":framework-nfc-javastream-protos",
+        ":statslog-st-Nfc-java-gen",
+    ],
+    visibility: [
+        "//vendor/st/opensource/commonsys/packages/apps/Nfc/tests/unit",
+    ],
+}
+
+filegroup {
+    name: "privapp_allowlist_com.android.st.nfc.xml",
+    srcs: ["com.android.nfcstm.xml"],
 }

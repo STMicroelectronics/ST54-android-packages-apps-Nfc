@@ -31,6 +31,7 @@ import android.nfc.tech.NfcV;
 import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
 import android.util.Log;
+
 import com.android.nfcstm.DeviceHost;
 import com.android.nfcstm.DeviceHost.TagEndpoint;
 
@@ -156,7 +157,7 @@ public class StNativeNfcTag implements TagEndpoint {
                 if (isNoDisc == false) {
                     doDisconnect();
                     if (tagDisconnectedCallback != null) {
-                        tagDisconnectedCallback.onTagDisconnected(mConnectedHandle);
+                        tagDisconnectedCallback.onTagDisconnected();
                     }
                 }
             }
@@ -1006,9 +1007,9 @@ public class StNativeNfcTag implements TagEndpoint {
         }
     }
 
-    public NdefMessage ReadNdef() {
-
-        Log.d(TAG, "ReadNdef- Searching for NfcCharging");
+    @Override
+    public NdefMessage getNdef() {
+        Log.d(TAG, "getNdef: Searching for NfcCharging information");
         int[] ndefinfo = new int[2];
         int status;
         NdefMessage ndefMsg = null;

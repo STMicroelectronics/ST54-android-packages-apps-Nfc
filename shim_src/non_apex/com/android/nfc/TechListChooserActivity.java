@@ -21,7 +21,9 @@ import android.content.pm.ResolveInfo;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.util.Log;
+
 import com.android.internal.app.ResolverActivity;
+
 import java.util.ArrayList;
 
 public class TechListChooserActivity extends ResolverActivity {

@@ -6,46 +6,64 @@ cc_library_shared {
         "-Wextra",
         "-Wno-unused-parameter",
         "-Werror",
-        "-DDCHECK_ALWAYS_ON"
-    ] ,
+        "-DDCHECK_ALWAYS_ON",
+    ],
+
+    product_variables: {
+        debuggable: {
+            cflags: [
+                "-DDTA_ENABLED",
+            ],
+        },
+    },
 
     srcs: ["*.cpp"],
+    export_include_dirs: [
+        ".",
+    ],
 
     shared_libs: [
         "libnativehelper",
         "libcutils",
         "libutils",
         "liblog",
-        "libstnfc-nci",
-        "libchrome",
         "libbase",
-        "libdl",
-        "libstatslog_nfc_st",
+        // Treble configuration
+        "libhidlbase",
+        "libbinder_ndk",
+        "libstatssocket",
+        "libz",
     ],
 
-    static_libs: [	"libxml2",
-    				"libstnfc_jni"],
-
-    export_include_dirs: ["."],
-
-    export_shared_lib_headers:
-    [
-      "libstnfc-nci",
+    static_libs: [
+        "android.hardware.nfc@1.0",
+        "android.hardware.nfc@1.1",
+        "android.hardware.nfc@1.2",
+        // Add for AIDL
+        "android.hardware.nfc-V1-ndk",
+        "android_nfc_flags_aconfig_c_lib",
+        "server_configurable_flags",
+        "libxml2",
+        "libstnfc_jni",
     ],
-
-    export_static_lib_headers:
-    [
-      "libstnfc_jni",
-    ],
+    //  export_static_lib_headers:
+    //   [
+    //     "libxml2",
+    //    "libstnfc_jni",
+    //   ],
 
     sanitize: {
         integer_overflow: true,
         misc_undefined: ["bounds"],
         scs: true,
     },
+    stl: "libc++_static",
+    apex_available: [
+        "//apex_available:platform",
+        "com.android.nfcstmservices",
+    ],
 
     proprietary: false,
     owner: "st",
     system_ext_specific: true,
-
 }
