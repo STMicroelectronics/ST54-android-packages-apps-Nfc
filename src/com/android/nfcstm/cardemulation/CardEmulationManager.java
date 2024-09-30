@@ -765,9 +765,9 @@ public class CardEmulationManager
             }
             Log.d(
                     TAG,
-                    "Set should default to observe mode for service ("
+                    "setShouldDefaultToObserveModeForService() - service: "
                             + service
-                            + ") to "
+                            + "to "
                             + enable);
             boolean currentStatus =
                     mServiceCache.doesServiceShouldDefaultToObserveMode(userId, service);

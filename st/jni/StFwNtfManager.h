@@ -124,9 +124,11 @@ class StFwNtfManager {
   // - discovery stopped
   // - unregistering, need to stop.
   // The thread manages the transitions of the state machine.
-  uint32_t mRPLLastFieldOnTs;    // FW time reference
-  uint32_t mRPLLastFieldOffTs;   // FW time reference
-  uint32_t mRPLLastDiscoStopTs;  // FW time reference
+  uint32_t mRPLLastFieldOnTs;             // FW time reference
+  uint32_t mRPLLastFieldOffTs;            // FW time reference
+  uint32_t mRPLLastDiscoStopTs;           // FW time reference
+  struct timespec mRPLLastDiscoStopReal;  // FW time reference
+
   // state machine of the algorithm
   int mRPLState;
   bool mRPLUnregistering;

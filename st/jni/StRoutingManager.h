@@ -60,8 +60,6 @@ class StRoutingManager {
   void stopforceRouting();
   void nfceeDiscover();
 
-  bool clearAidTable();
-
   static void stackCallback(uint8_t event, tNFA_CONN_EVT_DATA* eventData);
 
   void setUserDefaultRoutesPref(int mifareRoute, int isoDepRoute,
@@ -76,7 +74,6 @@ class StRoutingManager {
   void getDiscoveryTech(int* poll_mask, int* listen_mask);
 
   int getRemainingLmrtSize();
-  void notifyAidAdded();
   uint8_t getDisconnectedUiccId();
   void setDisconnectedUiccId(uint8_t id);
 
@@ -85,6 +82,10 @@ class StRoutingManager {
   static const int CLEAR_AID_ENTRIES = 0x01;
   static const int CLEAR_PROTOCOL_ENTRIES = 0x02;
   static const int CLEAR_TECHNOLOGY_ENTRIES = 0x04;
+  static const int FLAG_LISTEN_KEEP = 0x80000000;
+  static const int FLAG_SET_DEFAULT_TECH = 0x40000000;
+  static const int FLAG_USE_ALL_TECH = 0xff;
+
   void setEeInfoChangedFlag();
   void notifyEeUpdated();
 
@@ -113,9 +114,6 @@ class StRoutingManager {
 
   void setVarDefaultRoutes();
   bool checkIfUiccRoute();
-
-  void triggerOnHostEmulationData(uint8_t technology);
-  static void notifyOnHostEmulationData(void* data);
 
   // Every routing table entry is matched exact (BCM20793)
   static const int AID_MATCHING_EXACT_ONLY = 0x00;
@@ -208,10 +206,6 @@ class StRoutingManager {
   int mDiscListenMask;
 
   uint16_t mRemainingLmrtSize;
-  struct OnHostEmulationDataData {
-    uint8_t hceDataTech;
-    std::vector<uint8_t>* rxDataBuffer;
-  };
 
   tNFA_EE_CBACK_DATA mCbEventData;
   tNFA_EE_DISCOVER_REQ mEeInfo;

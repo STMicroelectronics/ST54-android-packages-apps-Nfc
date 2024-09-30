@@ -460,6 +460,18 @@ void NfcTag::discoverTechnologies(tNFA_ACTIVATED& activationData) {
       mTechList[mNumTechList] =
           TARGET_TYPE_ISO14443_3A;  // is TagTechnology.NFC_A
     }
+  } else if (rfDetail.protocol == NCI_PROTOCOL_NFC_DEP) {
+    if (rfDetail.rf_tech_param.mode == NFC_DISCOVERY_TYPE_POLL_A) {
+      LOG(DEBUG) << StringPrintf("%s; NFC-DEP type A", fn);
+      mTechList[mNumTechList] =
+          TARGET_TYPE_ISO14443_3A;  // is TagTechnology.NFC_A by Java API
+    } else if (rfDetail.rf_tech_param.mode == NFC_DISCOVERY_TYPE_POLL_F) {
+      LOG(DEBUG) << StringPrintf("%s; NFC-DEP type F", fn);
+      mTechList[mNumTechList] = TARGET_TYPE_FELICA;
+    } else {
+      LOG(DEBUG) << StringPrintf("%s; NFC-DEP unsupported type", fn);
+      mTechList[mNumTechList] = TARGET_TYPE_UNKNOWN;
+    }
   } else {
     if ((NCI_PROTOCOL_UNKNOWN == rfDetail.protocol) &&
         (rfDetail.rf_tech_param.mode == NFC_DISCOVERY_TYPE_POLL_B)) {
@@ -1101,6 +1113,17 @@ void NfcTag::fillNativeNfcTagMembers4(JNIEnv* e, jclass tag_cls, jobject tag,
                          activationData.params.i93.dsfid};
       actBytes.reset(e->NewByteArray(2));
       e->SetByteArrayRegion(actBytes.get(), 0, 2, (jbyte*)data);
+    } else if (NCI_PROTOCOL_NFC_DEP == mTechLibNfcTypes[i]) {
+      if (mTechList[i] == TARGET_TYPE_ISO14443_3A) {
+        LOG(DEBUG) << StringPrintf("%s; NFC-DEP; tech A", fn);
+        actBytes.reset(e->NewByteArray(1));
+        e->SetByteArrayRegion(actBytes.get(), 0, 1,
+                              (jbyte*)&mTechParams[i].param.pa.sel_rsp);
+      } else if (mTechList[i] == TARGET_TYPE_FELICA) {
+        LOG(DEBUG) << StringPrintf("%s; NFC-DEP; tech F", fn);
+        // really, there is no data
+        actBytes.reset(e->NewByteArray(0));
+      }
     } else {
       if ((NCI_PROTOCOL_UNKNOWN == mTechLibNfcTypes[i]) &&
           (mTechParams[i].mode == NFC_DISCOVERY_TYPE_POLL_B)) {

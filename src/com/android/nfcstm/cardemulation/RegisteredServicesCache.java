@@ -689,7 +689,7 @@ public class RegisteredServicesCache {
     }
 
     private void invalidateOther(int userId, List<ApduServiceInfo> validOtherServices) {
-        Log.d(TAG, "invalidateOther() - invalidate : " + userId);
+        Log.d(TAG, "invalidateOther() - userId: " + userId);
         ArrayList<ComponentName> toBeAdded = new ArrayList<>();
         ArrayList<ComponentName> toBeRemoved = new ArrayList<>();
         // remove services
@@ -714,25 +714,18 @@ public class RegisteredServicesCache {
                                     UserHandle.of(ActivityManager.getCurrentUser()), /* flags= */ 0)
                             .getSystemService(UserManager.class);
             boolean isManagedProfile = um.isManagedProfile(userId);
-            Log.i(
-                    TAG,
-                    "invalidateOther() - current user: "
-                            + ActivityManager.getCurrentUser()
-                            + ", is managed profile : "
-                            + isManagedProfile);
+            // Log.i(TAG, "invalidateOther() - current user: " + ActivityManager.getCurrentUser() +
+            //         ", is managed profile : " + isManagedProfile );
             boolean isChecked = !(isManagedProfile);
             // TODO: b/313040065 temperatory set isChecked always true due to there's no UI in AOSP
             isChecked = true;
 
             for (ApduServiceInfo service : validOtherServices) {
-                if (VDBG) {
-                    Log.d(
-                            TAG,
-                            "invalidateOther() - update valid otherService: "
-                                    + service.getComponent()
-                                    + " AIDs: "
-                                    + service.getAids());
-                }
+                // if (VDBG) {
+                //     Log.d(TAG, "invalidateOther() - update valid otherService: " +
+                // service.getComponent()
+                //             + " AIDs: " + service.getAids());
+                // }
                 if (!service.hasCategory(CardEmulation.CATEGORY_OTHER)) {
                     Log.e(TAG, "invalidateOther() - service does not have other category");
                     continue;
@@ -754,16 +747,22 @@ public class RegisteredServicesCache {
                 writeOthersLocked();
             }
         }
-        if (VDBG) {
-            Log.i(TAG, "invalidateOther() - Other Services => ");
-            dump(validOtherServices);
-        } else {
-            // dump only new services added or removed
-            Log.i(TAG, "invalidateOther() - New Other Services => ");
-            dump(toBeAdded);
-            Log.i(TAG, "invalidateOther() - Removed Other Services => ");
-            dump(toBeRemoved);
-        }
+        // if (VDBG) {
+        //     if (validOtherServices.size() > 0) {
+        //         Log.i(TAG, "invalidateOther() - Other Services => ");
+        //         dump(validOtherServices);
+        //     }
+        // } else {
+        //     if (toBeAdded.size() > 0) {
+        //         // dump only new services added or removed
+        //         Log.i(TAG, "invalidateOther() - New Other Services => ");
+        //         dump(toBeAdded);
+        //     }
+        //     if (toBeRemoved.size() > 0) {
+        //         Log.i(TAG, "invalidateOther() - Removed Other Services => ");
+        //         dump(toBeRemoved);
+        //     }
+        // }
     }
 
     private static final boolean convertValueToBoolean(CharSequence value, boolean defaultValue) {
@@ -918,12 +917,12 @@ public class RegisteredServicesCache {
             SettingsFile settingsFile) {
         Map<Integer, List<Pair<ComponentName, OtherServiceStatus>>> readSettingsMap =
                 new HashMap<>();
-        Log.d(TAG, "readOthersLocked()");
+        Log.d(TAG, "readOtherFromFile()");
 
         InputStream fis = null;
         try {
             if (!settingsFile.exists()) {
-                Log.d(TAG, "readOthersLocked() - Dynamic AIDs file does not exist.");
+                Log.d(TAG, "readOtherFromFile() - Dynamic AIDs file does not exist.");
                 return new HashMap<>();
             }
             fis = settingsFile.openRead();
@@ -948,7 +947,7 @@ public class RegisteredServicesCache {
                             String uidString = parser.getAttributeValue(null, "uid");
                             String checkedString = parser.getAttributeValue(null, "checked");
                             if (compString == null || uidString == null || checkedString == null) {
-                                Log.e(TAG, "readOthersLocked() - Invalid service attributes");
+                                Log.e(TAG, "readOtherFromFile() - Invalid service attributes");
                             } else {
                                 try {
                                     currentUid = Integer.parseInt(uidString);
@@ -956,7 +955,7 @@ public class RegisteredServicesCache {
                                             ComponentName.unflattenFromString(compString);
                                     checked = checkedString.equals("true") ? true : false;
                                 } catch (NumberFormatException e) {
-                                    Log.e(TAG, "readOthersLocked() - Could not parse service uid");
+                                    Log.e(TAG, "readOtherFromFile() - Could not parse service uid");
                                 }
                             }
                         }
@@ -964,12 +963,12 @@ public class RegisteredServicesCache {
                         if ("service".equals(tagName)) {
                             // See if we have a valid service
                             if (currentComponent != null && currentUid >= 0) {
-                                Log.d(TAG, "readOthersLocked() - end of service tag");
+                                // Log.d(TAG, "readOtherFromFile() - end of service tag");
                                 final int userId =
                                         UserHandle.getUserHandleForUid(currentUid).getIdentifier();
                                 OtherServiceStatus status =
                                         new OtherServiceStatus(currentUid, checked);
-                                Log.d(TAG, "readOthersLocked() - ## user id - " + userId);
+                                // Log.d(TAG, "readOtherFromFile() - ## user id - " + userId);
                                 if (!readSettingsMap.containsKey(userId)) {
                                     readSettingsMap.put(userId, new ArrayList<>());
                                 }
@@ -986,7 +985,7 @@ public class RegisteredServicesCache {
                 }
             }
         } catch (Exception e) {
-            Log.e(TAG, "readOthersLocked() - Could not parse others AIDs file, trashing.");
+            Log.e(TAG, "readOtherFromFile() - Could not parse others AIDs file, trashing.");
             settingsFile.delete();
         } finally {
             if (fis != null) {
@@ -1001,6 +1000,7 @@ public class RegisteredServicesCache {
     }
 
     private void readOthersLocked() {
+        Log.d(TAG, "readOthersLocked()");
         Map<Integer, List<Pair<ComponentName, OtherServiceStatus>>> readSettingsMap =
                 readOtherFromFile(mOthersFile);
         for (Integer userId : readSettingsMap.keySet()) {
@@ -1063,7 +1063,7 @@ public class RegisteredServicesCache {
     }
 
     private boolean writeOthersLocked() {
-        Log.d(TAG, "writeOthersLocked()");
+        // Log.d(TAG, "writeOthersLocked()");
 
         FileOutputStream fos = null;
         try {
@@ -1074,22 +1074,19 @@ public class RegisteredServicesCache {
             out.setFeature(XML_INDENT_OUTPUT_FEATURE, true);
             out.startTag(null, "services");
 
-            Log.d(TAG, "writeOthersLocked() - userServices.size: " + mUserServices.size());
+            // Log.d(TAG, "writeOthersLocked() - userServices.size: " + mUserServices.size());
             for (int i = 0; i < mUserServices.size(); i++) {
                 final UserServices user = mUserServices.valueAt(i);
                 int userId = mUserServices.keyAt(i);
                 // Checking for 1 times
-                Log.d(TAG, "writeOthersLocked() - userId: " + userId);
-                Log.d(TAG, "writeOthersLocked() - others size: " + user.others.size());
+                // Log.d(TAG, "writeOthersLocked() - userId: " + userId);
+                // Log.d(TAG, "writeOthersLocked() - others size: " + user.others.size());
                 ArrayList<ComponentName> currentService = new ArrayList<ComponentName>();
                 for (Map.Entry<ComponentName, OtherServiceStatus> service :
                         user.others.entrySet()) {
-                    Log.d(
-                            TAG,
-                            "writeOthersLocked() - component: "
-                                    + service.getKey().flattenToString()
-                                    + ", checked: "
-                                    + service.getValue().checked);
+                    // Log.d(TAG, "writeOthersLocked() - component: " +
+                    // service.getKey().flattenToString() +
+                    //         ", checked: " + service.getValue().checked);
 
                     boolean hasDupe = false;
                     for (ComponentName cn : currentService) {
@@ -1101,7 +1098,7 @@ public class RegisteredServicesCache {
                     if (hasDupe) {
                         continue;
                     } else {
-                        Log.d(TAG, "writeOthersLocked() - Already written.");
+                        // Log.d(TAG, "writeOthersLocked() - Already written.");
                         currentService.add(service.getKey());
                     }
 
@@ -1600,7 +1597,10 @@ public class RegisteredServicesCache {
         UserServices services = findOrCreateUserLocked(userId);
         ApduServiceInfo serviceInfo = services.services.get(service);
         if (serviceInfo == null) {
-            Log.d(TAG, "serviceInfo is null");
+            Log.d(
+                    TAG,
+                    "doesServiceShouldDefaultToObserveMode() - service null, not default for"
+                            + " observe mode");
             return false;
         }
         return serviceInfo.shouldDefaultToObserveMode();

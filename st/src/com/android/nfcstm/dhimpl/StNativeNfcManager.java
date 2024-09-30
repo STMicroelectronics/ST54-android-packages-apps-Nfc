@@ -169,8 +169,6 @@ public class StNativeNfcManager implements StDeviceHost {
     @Override
     public native boolean unrouteAid(byte[] aid);
 
-    public native boolean clearAidTable();
-
     public native void forceRouting(int nfceeid);
 
     public native void stopforceRouting();

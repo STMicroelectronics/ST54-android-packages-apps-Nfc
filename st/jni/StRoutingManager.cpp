@@ -72,7 +72,6 @@ static IntervalTimer gMepReconfTimer;
 static tNFA_EE_DISCOVER_REQ gTempEeInfo;
 static Mutex sEeInfoMutex;
 static Mutex sEeInfoChangedMutex;
-typedef void* (*THREADFUNCPTR)(void*);
 
 /*******************************************************************************
 **
@@ -513,25 +512,6 @@ bool StRoutingManager::addAidRouting(const uint8_t* aid, uint8_t aidLen,
 
 /*******************************************************************************
 **
-** Function:        notifyAidAdded
-**
-** Description:
-**
-** Returns:         None
-**
-*******************************************************************************/
-void StRoutingManager::notifyAidAdded() {
-  static const char fn[] = "StRoutingManager::notifyAidAdded";
-  LOG(DEBUG) << fn;
-
-  mAidRoutingConfigured = true;
-
-  SyncEventGuard guard(mRoutingEvent);
-  mRoutingEvent.notifyOne();
-}
-
-/*******************************************************************************
-**
 ** Function:        removeAidRouting
 **
 ** Description:     Receive execution environment-related events from stack.
@@ -585,9 +565,9 @@ bool StRoutingManager::commitRouting() {
     mEeInfoChanged = false;
     sEeInfoChangedMutex.unlock();
 
-    // Update verything as some NFCEE might have been connected/
+    // Update everything as some NFCEE might have been connected/
     // disconnect
-    NFA_EeClearRoutingTable(mScRoutingConfigured ? false : true);
+    clearRoutingEntry(CLEAR_PROTOCOL_ENTRIES | CLEAR_TECHNOLOGY_ENTRIES);
 
     updateRoutingTable();
   } else {
@@ -870,83 +850,6 @@ void StRoutingManager::notifyDefaultRouteSet(int aidRoute, int mifareRoute,
 }
 
 /*******************************************************************************
- **
- ** Function:        triggerOnHostEmulationData
- **
- ** Description:    starts a thread for calling notifyOnHostEmulationData.
- **
- ** Returns:         void
- **
- *******************************************************************************/
-void StRoutingManager::triggerOnHostEmulationData(uint8_t technology) {
-  pthread_attr_t pa;
-  pthread_t p;
-
-  // Create a temporary copy of the data to be used by the thread to avoid
-  // corruption risk
-  OnHostEmulationDataData* data = new OnHostEmulationDataData();
-  data->hceDataTech = technology;
-  data->rxDataBuffer = new std::vector<uint8_t>(mRxDataBuffer);
-
-  // create detached thread to call notifyOnHostEmulationData
-  (void)pthread_attr_init(&pa);
-  (void)pthread_attr_setdetachstate(&pa, PTHREAD_CREATE_DETACHED);
-  (void)pthread_create(
-      &p, &pa, (THREADFUNCPTR)&StRoutingManager::notifyOnHostEmulationData,
-      data);
-  (void)pthread_attr_destroy(&pa);
-}
-
-/*******************************************************************************
-**
-** Function:        notifyOnHostEmulationData
-**
-** Description:     calls gCachedNfcManagerNotifyHostEmuData
-**
-** Returns:         None
-**
-*******************************************************************************/
-void StRoutingManager::notifyOnHostEmulationData(void* data) {
-  JNIEnv* e = NULL;
-  StRoutingManager& ins = StRoutingManager::getInstance();
-  ScopedAttach attach(ins.mNativeData->vm, &e);
-  OnHostEmulationDataData* d = (OnHostEmulationDataData*)data;
-  if (e == NULL) {
-    LOG(ERROR) << __func__ << ";jni env is null";
-    delete d->rxDataBuffer;
-    delete d;
-    return;
-  }
-
-  ScopedLocalRef<jobject> dataJavaArray(
-      e, e->NewByteArray(d->rxDataBuffer->size()));
-  if (dataJavaArray.get() == NULL) {
-    LOG(ERROR) << __func__ << "; fail allocate array";
-    goto TheEnd;
-  }
-
-  e->SetByteArrayRegion((jbyteArray)dataJavaArray.get(), 0,
-                        d->rxDataBuffer->size(),
-                        (jbyte*)(&d->rxDataBuffer->data()[0]));
-  if (e->ExceptionCheck()) {
-    e->ExceptionClear();
-    LOG(ERROR) << __func__ << "; fail fill array";
-    goto TheEnd;
-  }
-
-  e->CallVoidMethod(ins.mNativeData->manager,
-                    android::gCachedNfcManagerNotifyHostEmuData,
-                    (int)d->hceDataTech, dataJavaArray.get());
-  if (e->ExceptionCheck()) {
-    e->ExceptionClear();
-    LOG(ERROR) << __func__ << "; fail notify";
-  }
-TheEnd:
-  delete d->rxDataBuffer;
-  delete d;
-}
-
-/*******************************************************************************
 **
 ** Function:        handleData
 **
@@ -976,10 +879,37 @@ void StRoutingManager::handleData(uint8_t technology, const uint8_t* data,
     goto TheEnd;
   }
 
-  // Start separate thread to inform Upper layer of HCE data
-  // Avoid possible deadlocks
-  triggerOnHostEmulationData(technology);
+  {
+    JNIEnv* e = NULL;
+    ScopedAttach attach(mNativeData->vm, &e);
+    if (e == NULL) {
+      LOG(ERROR) << __func__ << ";jni env is null";
+      goto TheEnd;
+    }
 
+    ScopedLocalRef<jobject> dataJavaArray(
+        e, e->NewByteArray(mRxDataBuffer.size()));
+    if (dataJavaArray.get() == NULL) {
+      LOG(ERROR) << __func__ << "; fail allocate array";
+      goto TheEnd;
+    }
+
+    e->SetByteArrayRegion((jbyteArray)dataJavaArray.get(), 0,
+                          mRxDataBuffer.size(), (jbyte*)(&mRxDataBuffer[0]));
+    if (e->ExceptionCheck()) {
+      e->ExceptionClear();
+      LOG(ERROR) << __func__ << "; fail fill array";
+      goto TheEnd;
+    }
+
+    e->CallVoidMethod(mNativeData->manager,
+                      android::gCachedNfcManagerNotifyHostEmuData,
+                      (int)technology, dataJavaArray.get());
+    if (e->ExceptionCheck()) {
+      e->ExceptionClear();
+      LOG(ERROR) << __func__ << "; fail notify";
+    }
+  }
 TheEnd:
   mRxDataBuffer.clear();
 }
@@ -1325,12 +1255,12 @@ void StRoutingManager::updateDefaultRoute() {
                        : 0x11;
 
     {
-      SyncEventGuard guard(mRoutingEvent);
+      SyncEventGuard guard(mAidAddRemoveEvent);
       mAidRoutingConfigured = false;
       nfaStat = NFA_EeAddAidRouting(mConnectedDefaultAidRoute, 0, NULL,
                                     powerState, AID_ROUTE_QUAL_PREFIX);
       if (nfaStat == NFA_STATUS_OK) {
-        mRoutingEvent.wait();
+        mAidAddRemoveEvent.wait();
       }
       if (mAidRoutingConfigured) {
       } else {
@@ -1539,18 +1469,44 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
     }
 
     /*** Check if a tech shall be muted - only for HCI EE ***/
+    //   wanted:
+    // - if eSE supports A ou B but not both
+    // - AND listenTech & (A|B) == A+B  (if not, do nothing)
+    // - AND flag DEFAULT
+    //    ==> update dm_disc_listen_mask_dfl with requested value EXCEPT A or B
+    //    not supported by SE
+    //     if KEEP:
+    //        if ALL
+    //           ==> set dm_disc_listen_mask_dfl with A only or B only
+    //        if A+B
+    //           ==> do not change dm_disc_listen_mask_dfl
+    //        if A+B+F
+    //           ==> do not change dm_disc_listen_mask_dfl
+    //     else (!KEEP):
+    //        if ALL
+    //           ==> set dm_disc_listen_mask_dfl with A+F or B+F
+    //        if A+B
+    //           ==> set dm_disc_listen_mask_dfl with A only or B only
+    //        if A+B+F
+    //           ==> set dm_disc_listen_mask_dfl with A+F or B+F
     if (eeHandle == (mConnectedDefaultOffHostRoute | NFA_HANDLE_GROUP_EE)) {
       if (natStExt.getObserverMode()) {
         NFA_ChangeDiscoveryTech(mDiscPollMask, 0x00,
                                 (mDiscPollMask < 0 ? true : false), true);
         muteTechSet = true;
       } else if (((eeHandle & 0x480) == 0x480) &&
-                 (mDiscListenMask == mLastIsoDepListenMask) &&
                  ((seTechMask &
-                   (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) != 0)) {
-        // if we are configuring the default route to HCI EE which supports A
-        // and/or B:
-        int listenMask = mDiscListenMask;
+                   (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) != 0) &&
+                 ((seTechMask &
+                   (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) !=
+                  (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) &&
+                 ((mDiscListenMask &
+                   (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) ==
+                  (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B)) &&
+                 (mDiscListenMask & FLAG_SET_DEFAULT_TECH)) {
+        // We are going to remove A or B from the DH
+        int listenMask = (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B |
+                          NFA_TECHNOLOGY_MASK_F);
         // If A not supported, block A
         if ((seTechMask & NFA_TECHNOLOGY_MASK_A) == 0) {
           listenMask &= ~NFA_TECHNOLOGY_MASK_A;
@@ -1559,13 +1515,32 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
         if ((seTechMask & NFA_TECHNOLOGY_MASK_B) == 0) {
           listenMask &= ~NFA_TECHNOLOGY_MASK_B;
         }
+
+        // If KEEP flag is set
+        if (mDiscListenMask & FLAG_LISTEN_KEEP) {
+          // ALL_TECH
+          if ((mDiscListenMask & FLAG_USE_ALL_TECH) != FLAG_USE_ALL_TECH) {
+            // we don t want to change the default value previously set
+            listenMask = FLAG_LISTEN_KEEP;
+          }
+        } else {
+          // we set all requested as default except A or B not supported by SE
+          listenMask |= (mDiscListenMask &
+                         ~(NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B));
+        }
+
         NFA_ChangeDiscoveryTech(mDiscPollMask, listenMask,
-                                (mDiscPollMask < 0 ? true : false), false);
-      } else {
-        // other cases, we just follow mMuteTechBitmap
-        NFA_ChangeDiscoveryTech(mDiscPollMask, mDiscListenMask,
                                 (mDiscPollMask < 0 ? true : false),
-                                (mDiscListenMask < 0 ? true : false));
+                                (listenMask < 0 ? true : false), true);
+      } else {
+        bool isDefault =
+            ((mDiscPollMask & FLAG_SET_DEFAULT_TECH) != 0 ? true : false) ||
+            ((mDiscListenMask & FLAG_SET_DEFAULT_TECH) != 0 ? true : false);
+
+        // other cases, we just follow mMuteTechBitmap
+        NFA_ChangeDiscoveryTech(
+            mDiscPollMask, mDiscListenMask, (mDiscPollMask < 0 ? true : false),
+            (mDiscListenMask < 0 ? true : false), isDefault);
       }
       muteTechSet = true;
     }
@@ -1621,9 +1596,11 @@ tNFA_TECHNOLOGY_MASK StRoutingManager::updateEeTechRouteSetting() {
 
   if (!muteTechSet) {
     // ensure the mask is restored
-    NFA_ChangeDiscoveryTech(mDiscPollMask, mDiscListenMask,
-                            (mDiscPollMask < 0 ? true : false),
-                            (mDiscListenMask < 0 ? true : false));
+    NFA_ChangeDiscoveryTech(
+        mDiscPollMask, mDiscListenMask, (mDiscPollMask < 0 ? true : false),
+        (mDiscListenMask < 0 ? true : false),
+        ((mDiscPollMask & FLAG_SET_DEFAULT_TECH) != 0 ? true : false) ||
+            ((mDiscListenMask & FLAG_SET_DEFAULT_TECH) != 0 ? true : false));
   }
 
   /**************************************************************/
@@ -1969,12 +1946,15 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_MODE_SET_EVT: {
-      se.notifyModeSet((eventData->mode_set));
-      SyncEventGuard guard(routingManager.mEeSetModeEvent);
-      LOG(DEBUG) << StringPrintf(
-          "%s; NFA_EE_MODE_SET_EVT; status: 0x%04X  handle: 0x%04X  ", fn,
-          eventData->mode_set.status, eventData->mode_set.ee_handle);
-      routingManager.mEeSetModeEvent.notifyOne();
+      // Only notify if not NDEF-NFCEE, as it is handled by own code
+      if ((eventData->mode_set.ee_handle & 0xFF) != 0x10) {
+        se.notifyModeSet((eventData->mode_set));
+        SyncEventGuard guard(routingManager.mEeSetModeEvent);
+        LOG(DEBUG) << StringPrintf(
+            "%s; NFA_EE_MODE_SET_EVT; status: 0x%04X  handle: 0x%04X  ", fn,
+            eventData->mode_set.status, eventData->mode_set.ee_handle);
+        routingManager.mEeSetModeEvent.notifyOne();
+      }
     } break;
 
     case NFA_EE_SET_TECH_CFG_EVT: {
@@ -2006,14 +1986,14 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_STATUS_NTF_EVT: {
-      LOG(DEBUG) << StringPrintf(
-          "%s; NFA_EE_STATUS_NTF_EVT; status: 0x%04X  nfcee_id: 0x%04X", fn,
-          eventData->status_ntf.status,
-          ((tNFA_EE_STATUS_NTF*)eventData)->nfcee_id);
+      if (eventData->status_ntf.nfcee_id != 0x10) {
+        LOG(DEBUG) << StringPrintf(
+            "%s; NFA_EE_STATUS_NTF_EVT; status: 0x%04X  nfcee_id: 0x%04X", fn,
+            eventData->status_ntf.status, eventData->status_ntf.nfcee_id);
 
-      se.notifyEeStatus(
-          ((tNFA_EE_STATUS_NTF*)eventData)->nfcee_id | NFA_HANDLE_GROUP_EE,
-          eventData->status_ntf.status);
+        se.notifyEeStatus(eventData->status_ntf.nfcee_id | NFA_HANDLE_GROUP_EE,
+                          eventData->status_ntf.status);
+      }
     } break;
 
     case NFA_EE_ACTION_EVT: {
@@ -2063,8 +2043,7 @@ void StRoutingManager::nfaEeCallback(tNFA_EE_EVT event,
               "wait 500ms for reconfiguration",
               fn, eventData->discover_req.ee_disc_info[i].ee_handle);
 
-          memcpy(&gTempEeInfo, &eventData->discover_req,
-                 sizeof(routingManager.mEeInfo));
+          memcpy(&gTempEeInfo, &eventData->discover_req, sizeof(gTempEeInfo));
 
           gTechReconfTimer.set(500, reconfLmrtNoTechCb);
           return;
@@ -2469,62 +2448,35 @@ void StRoutingManager::eeSetPwrAndLinkCtrl(uint8_t config) {
 void StRoutingManager::clearRoutingEntry(int clearFlags) {
   static const char fn[] = "StRoutingManager::clearRoutingEntry";
 
-  LOG(DEBUG) << StringPrintf("%s; Enter . Clear flags = %d", fn, clearFlags);
+  LOG(DEBUG) << StringPrintf("%s;  clearFlags = %x", fn, clearFlags);
   tNFA_STATUS nfaStat = NFA_STATUS_FAILED;
+  bool clear_tech = false, clear_proto = false;
+
+  if (mDeinitializing) {
+    LOG(DEBUG) << StringPrintf("%s; De-initializing, exit", fn);
+    return;
+  }
 
   if (clearFlags & CLEAR_AID_ENTRIES) {
     LOG(DEBUG) << StringPrintf("%s; clear all of aid based routing", fn);
-    uint8_t clearAID[] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    uint8_t aidLen = 0x08;
-    StRoutingManager::getInstance().removeAidRouting(clearAID, aidLen);
+    StRoutingManager::getInstance().removeAidRouting(
+        (uint8_t*)NFA_REMOVE_ALL_AID, NFA_REMOVE_ALL_AID_LEN);
+    mAidRoutingConfigured = false;
+    mWantedAidRouteOnUicc = false;
+    setEeInfoChangedFlag();
   }
 
   if (clearFlags & CLEAR_PROTOCOL_ENTRIES) {
-    for (uint8_t i = 0; i < mEeInfo.num_ee; i++) {
-      tNFA_HANDLE eeHandle = mEeInfo.ee_disc_info[i].ee_handle;
-      {
-        SyncEventGuard guard(mRoutingEvent);
-        nfaStat =
-            NFA_EeClearDefaultProtoRouting(eeHandle, NFA_PROTOCOL_MASK_ISO_DEP);
-        if (nfaStat == NFA_STATUS_OK) {
-          mRoutingEvent.wait();
-        }
-      }
-    }
-
-    {
-      SyncEventGuard guard(mRoutingEvent);
-      nfaStat =
-          NFA_EeClearDefaultProtoRouting(NFC_DH_ID, NFA_PROTOCOL_MASK_ISO_DEP);
-      if (nfaStat == NFA_STATUS_OK) {
-        mRoutingEvent.wait();
-      }
-    }
+    clear_proto = true;
   }
 
   if (clearFlags & CLEAR_TECHNOLOGY_ENTRIES) {
-    for (uint8_t i = 0; i < mEeInfo.num_ee; i++) {
-      tNFA_HANDLE eeHandle = mEeInfo.ee_disc_info[i].ee_handle;
-      {
-        SyncEventGuard guard(mRoutingEvent);
-        nfaStat = NFA_EeClearDefaultTechRouting(
-            eeHandle, (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B |
-                       NFA_TECHNOLOGY_MASK_F));
-        if (nfaStat == NFA_STATUS_OK) {
-          mRoutingEvent.wait();
-        }
-      }
-    }
+    clear_tech = true;
+  }
 
-    {
-      SyncEventGuard guard(mRoutingEvent);
-      nfaStat = NFA_EeClearDefaultTechRouting(
-          NFC_DH_ID, (NFA_TECHNOLOGY_MASK_A | NFA_TECHNOLOGY_MASK_B |
-                      NFA_TECHNOLOGY_MASK_F));
-      if (nfaStat == NFA_STATUS_OK) {
-        mRoutingEvent.wait();
-      }
-    }
+  if (clear_proto || clear_tech || (!mScRoutingConfigured)) {
+    NFA_EeClearRoutingTable(clear_tech, clear_proto,
+                            mScRoutingConfigured ? false : true);
   }
 }
 
@@ -2757,43 +2709,6 @@ int StRoutingManager::com_android_nfc_cardemulation_doGetAidMatchingMode(
 int StRoutingManager::
     com_android_nfc_cardemulation_doGetDefaultIsoDepRouteDestination(JNIEnv*) {
   return getInstance().mDefaultIsoDepRoute;
-}
-
-/*******************************************************************************
-**
-** Function:        clearAidTable
-**
-** Description:     Receive execution environment-related events from stack.
-**                  event: Event code.
-**                  eventData: Event data.
-**
-** Returns:         None
-**
-*******************************************************************************/
-bool StRoutingManager::clearAidTable() {
-  static const char fn[] = "StRoutingManager::clearAidTable";
-  LOG(DEBUG) << StringPrintf("%s; enter", fn);
-
-  if (mDeinitializing) {
-    LOG(DEBUG) << StringPrintf("%s; De-initializing, exit", fn);
-    return true;
-  }
-
-  SyncEventGuard guard(mRoutingEvent);
-
-  tNFA_STATUS nfaStat = NFA_EeRemoveAidRouting(NFA_REMOVE_ALL_AID_LEN,
-                                               (uint8_t*)NFA_REMOVE_ALL_AID);
-
-  if (nfaStat == NFA_STATUS_OK) {
-    mRoutingEvent.wait();
-    mAidRoutingConfigured = false;
-    mWantedAidRouteOnUicc = false;
-    setEeInfoChangedFlag();
-    return true;
-  } else {
-    LOG(ERROR) << StringPrintf("%s; failed to remove AID", fn);
-    return false;
-  }
 }
 
 /*******************************************************************************

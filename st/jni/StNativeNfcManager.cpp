@@ -392,16 +392,9 @@ static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
         isoMifareBitmap, isIsoMifareFlag);
   }
 
-  if (discoveredDevice->protocol != NFC_PROTOCOL_T1T) {
-    if ((discoveredDevice->protocol == NFC_PROTOCOL_NFC_DEP) &&
-        (discoveredDevice->rf_tech_param.mode == NFC_DISCOVERY_TYPE_POLL_A)) {
-      sak = discoveredDevice->rf_tech_param.param.pa.sel_rsp;
-      LOG(DEBUG) << StringPrintf("%s; Sak: 0x%x", __func__, sak);
-    }
-
-    if (sak != 0x53) {
-      NfcTag::getInstance().mNumDiscNtf++;
-    }
+  if ((discoveredDevice->protocol != NFC_PROTOCOL_T1T) &&
+      (discoveredDevice->protocol != NFC_PROTOCOL_NFC_DEP)) {
+    NfcTag::getInstance().mNumDiscNtf++;
   }
 
   if (discoveredDevice->more == NCI_DISCOVER_NTF_MORE) {
@@ -430,18 +423,14 @@ static void handleRfDiscoveryEvent(tNFC_RESULT_DEVT* discoveredDevice) {
     gIsSelectingNextTag = false;
   }
 
-  if (!sReaderModeEnabled &&
-      (discoveredDevice->protocol == NFA_PROTOCOL_NFC_DEP)) {
-    if (sak == 0x53) {
-      LOG(DEBUG) << StringPrintf(
-          "%s; Tag supports both NFC-DEP and ISO-DEP, skip NFC-DEP "
-          "detection ",
-          __func__);
-      NfcTag::getInstance().mNumDiscNtf = 0x00;
-      NfcTag::getInstance().mIsMultiProtocolTag = false;
-      NfcTag::getInstance().selectFirstTag();
-      return;
-    }
+  if (discoveredDevice->protocol == NFA_PROTOCOL_NFC_DEP) {
+    // if (sak == 0x53) {
+    LOG(DEBUG) << StringPrintf("%s; Skip NFC-DEP detection ", __func__);
+    NfcTag::getInstance().mNumDiscNtf = 0x00;
+    NfcTag::getInstance().mIsMultiProtocolTag = false;
+    NfcTag::getInstance().selectFirstTag();
+    return;
+    // }
   } else if (NfcTag::getInstance().mNumDiscNtf == 0x01) {
     LOG(DEBUG) << StringPrintf(
         "%s; Only one tag detected, skip multitag detection", __func__);
@@ -982,11 +971,11 @@ void nfaConnectionCallback(uint8_t connEvent, tNFA_CONN_EVT_DATA* eventData) {
         }
 
         if (gIsSelectingRfInterface && notListen) {
-          nativeNfcTag_doConnectStatus(true);
           if (nativeNfcTag_isReselectIdleTag() == true) {
             NfcTag::getInstance().connectionEventHandler(
                 NFA_ACTIVATED_UPDATE_EVT, eventData);
           }
+          nativeNfcTag_doConnectStatus(true);
           break;
         }
 
@@ -3106,19 +3095,6 @@ static void stNfcManager_nfceeDiscover(JNIEnv*, jobject) {
 
 /*******************************************************************************
 **
-** Function:        nfcManager_clearAidTable
-**
-** Description:     Clean all AIDs in routing table
-**                  e: JVM environment.
-**                  o: Java object.
-**
-*******************************************************************************/
-static bool stNfcManager_clearAidTable(JNIEnv*, jobject) {
-  return StRoutingManager::getInstance().clearAidTable();
-}
-
-/*******************************************************************************
-**
 ** Function:        nfcManager_getIsoDepMaxTransceiveLength
 **
 ** Description:     Get maximum ISO DEP Transceive Length supported by the NFC
@@ -3336,7 +3312,7 @@ static jbyteArray nfcManager_doGetRoutingTable(JNIEnv* e, jobject o) {
 static void nfcManager_clearRoutingEntry(JNIEnv* e, jobject o,
                                          jint clearFlags) {
   LOG(DEBUG) << StringPrintf("%s; clearFlags=0x%X", __func__, clearFlags);
-  StRoutingManager::getInstance().disableRoutingToHost();
+  // StRoutingManager::getInstance().disableRoutingToHost();
   StRoutingManager::getInstance().clearRoutingEntry(clearFlags);
 }
 
@@ -3592,8 +3568,6 @@ static JNINativeMethod gMethods[] = {
     {"unrouteAid", "([B)Z", (void*)stNfcManager_unrouteAid},
 
     {"commitRouting", "()Z", (void*)stNfcManager_commitRouting},
-
-    {"clearAidTable", "()Z", (void*)stNfcManager_clearAidTable},
 
     {"doRegisterT3tIdentifier", "([B)I",
      (void*)StNfcManager_doRegisterT3tIdentifier},

@@ -1779,6 +1779,7 @@ void StFwNtfManager::pollingLoopSpyManagerEnable(bool enable) {
       mRPLLastFieldOnTs = 0;
       mRPLLastFieldOffTs = 0;
       mRPLLastDiscoStopTs = 0;
+      mRPLLastDiscoStopReal = {.tv_sec = 0, .tv_nsec = 0};
       mRPLUnregistering = false;
       mRPLString = (char*)malloc(RPL_STR_MAXLEN);
       if (mRPLString == NULL) {
@@ -1995,6 +1996,8 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
   char type = '?';
   uint8_t gain = 0xFF;
   uint8_t errstatus = 0xFF;
+  struct timespec now = {.tv_sec = 0, .tv_nsec = 0};
+  int diff = 0;
 
   if ((t != T_fieldOff) && (t != T_fieldOn) && (t != T_fieldSenseStopped) &&
       (t != T_CERxError) && (t != T_CERx)) {
@@ -2008,6 +2011,15 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
       type = 'O';
       mRPLLastFieldOnTs = receivedFwts;
       mRPLSync.notifyOne();
+      diff = fwTsDiffToMs(format, mRPLLastDiscoStopTs, 0xffffffff);
+      if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+        LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X", __func__,
+                                   errno);
+      } else if ((now.tv_sec - mRPLLastDiscoStopReal.tv_sec > 10) ||
+                 (diff < 10000)) {
+        // Last stored timestamp is too old, try to avoid buffer overlap
+        mRPLLastDiscoStopTs = receivedFwts - 1;
+      }
       break;
     case T_fieldOff:
       type = 'o';
@@ -2016,6 +2028,10 @@ void StFwNtfManager::handlePollingLoopData(uint8_t format, uint16_t data_len,
       break;
     case T_fieldSenseStopped:
       mRPLLastDiscoStopTs = receivedFwts;
+      if (clock_gettime(CLOCK_MONOTONIC, &mRPLLastDiscoStopReal) == -1) {
+        LOG(ERROR) << StringPrintf("%s; fail get time; errno=0x%X", __func__,
+                                   errno);
+      }
       mRPLSync.notifyOne();
       break;
   }

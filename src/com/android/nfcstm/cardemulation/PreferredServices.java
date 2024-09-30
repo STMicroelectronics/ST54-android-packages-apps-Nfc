@@ -312,29 +312,11 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
             preferredService = mNextTapDefault;
             preferredServiceUserId = mNextTapDefaultUserId;
 
-            if (preferredService != null) {
-                if (DBG)
-                    Log.d(
-                            TAG,
-                            "computePreferredForegroundService() - preferredService(next tap "
-                                    + "default): "
-                                    + preferredService.flattenToString());
-            }
-
             if (preferredService == null) {
                 // Prio 2: foreground requested by app
                 preferredService = mForegroundRequested;
                 preferredServiceUserId =
                         UserHandle.getUserHandleForUid(mForegroundUid).getIdentifier();
-
-                if (mForegroundRequested != null) {
-                    if (DBG)
-                        Log.d(
-                                TAG,
-                                "computePreferredForegroundService() - preferredService(next tap "
-                                        + "default): null, mForegroundRequested: "
-                                        + mForegroundRequested.flattenToString());
-                }
             }
             if (preferredService != null
                     && (!preferredService.equals(mForegroundCurrent)
@@ -400,7 +382,7 @@ public class PreferredServices implements com.android.nfcstm.ForegroundUtils.Cal
                                     + mForegroundCurrent.flattenToString());
 
                 if (!isForegroundAllowedLocked(mForegroundCurrent, mForegroundCurrentUid)) {
-                    Log.d(TAG, "Removing foreground preferred service.");
+                    Log.d(TAG, "onServicesUpdated() - Removing foreground preferred service.");
                     mForegroundRequested = null;
                     mForegroundUid = -1;
                     mForegroundCurrentUid = -1;

@@ -84,6 +84,7 @@ namespace android {
 #define NDEF_MIFARE_CLASSIC_TAG 101
 
 #define STATUS_CODE_TARGET_LOST 146  // this error code comes from the service
+#define STATUS_CODE_TARGET_MISMATCH 2
 
 static uint32_t sCheckNdefCurrentSize = 0;
 static tNFA_STATUS sCheckNdefStatus =
@@ -139,7 +140,7 @@ static bool sReselectIdleTag = false;
 static bool sReselectDiscRestart = false;
 
 int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded);
-static bool switchRfInterface(tNFA_INTF_TYPE rfInterface);
+static int switchRfInterface(tNFA_INTF_TYPE rfInterface);
 
 extern bool gIsDtaEnabled;
 
@@ -822,20 +823,18 @@ static jint nativeNfcTag_doConnect(JNIEnv*, jobject, jint targetHandle) {
       LOG(DEBUG) << StringPrintf(
           "%s; switching to tech: %d need to switch rf intf to frame", __func__,
           sCurrentConnectedTargetType);
-      retCode = switchRfInterface(NFA_INTERFACE_FRAME) ? NFA_STATUS_OK
-                                                       : NFA_STATUS_FAILED;
+      retCode = switchRfInterface(NFA_INTERFACE_FRAME);
     }
   } else {
     if (sCurrentConnectedTargetType == TARGET_TYPE_MIFARE_CLASSIC) {
-      retCode = switchRfInterface(NFC_INTERFACE_MIFARE) ? NFA_STATUS_OK
-                                                        : NFA_STATUS_FAILED;
+      retCode = switchRfInterface(NFC_INTERFACE_MIFARE);
     } else {
-      retCode = switchRfInterface(NFA_INTERFACE_ISO_DEP) ? NFA_STATUS_OK
-                                                         : NFA_STATUS_FAILED;
+      retCode = switchRfInterface(NFA_INTERFACE_ISO_DEP);
     }
   }
 
-  if ((retCode == NFA_STATUS_OK) &&
+  if (((retCode == NFA_STATUS_OK) ||
+       (retCode == STATUS_CODE_TARGET_MISMATCH)) &&
       (sCurrentConnectedTargetProtocol == NFC_PROTOCOL_UNKNOWN)) {
     // For cashbee case, the tag returned to Idle state when put to sleep
     // This caused the abortWaits() to be called and reset the following
@@ -937,8 +936,6 @@ int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded) {
                                __func__);
     sRfInterfaceMutex.unlock();
     return 0;  // success
-  } else {
-    LOG(DEBUG) << StringPrintf("%s: DTA; bypass flag not set", __func__);
   }
 
   NfcTag& natTag = NfcTag::getInstance();
@@ -1115,10 +1112,10 @@ int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded) {
       if (sCurrentRfInterface == rfInterface) {
         rVal = 0;  // success
       } else {
-        LOG(ERROR) << StringPrintf(
+        LOG(WARNING) << StringPrintf(
             "%s; Connected interface is 0x%02X, requested interface: 0x%02X",
             __func__, sCurrentRfInterface, rfInterface);
-        rVal = 1;
+        rVal = STATUS_CODE_TARGET_MISMATCH;
       }
       break;
     } else {
@@ -1147,7 +1144,7 @@ int reSelect(tNFA_INTF_TYPE rfInterface, bool fSwitchIfNeeded) {
 ** Returns:         True if ok.
 **
 *******************************************************************************/
-static bool switchRfInterface(tNFA_INTF_TYPE rfInterface) {
+static int switchRfInterface(tNFA_INTF_TYPE rfInterface) {
   NfcTag& natTag = NfcTag::getInstance();
 
   if ((sCurrentConnectedTargetProtocol != NFC_PROTOCOL_ISO_DEP) &&
@@ -1155,22 +1152,16 @@ static bool switchRfInterface(tNFA_INTF_TYPE rfInterface) {
     LOG(DEBUG) << StringPrintf(
         "%s; protocol: %d not ISO_DEP nor MFC, do nothing", __func__,
         natTag.mTechLibNfcTypes[0]);
-    return true;
+    return NFA_STATUS_OK;
   }
 
   LOG(DEBUG) << StringPrintf("%s; new rf intf = %d, cur rf intf = %d", __func__,
                              rfInterface, sCurrentRfInterface);
-  bool rVal = true;
   if (rfInterface != sCurrentRfInterface) {
-    if (0 == reSelect(rfInterface, true)) {
-      //            sCurrentRfInterface = rfInterface;
-      rVal = true;
-    } else {
-      rVal = false;
-    }
+    return reSelect(rfInterface, true);
   }
 
-  return rVal;
+  return NFA_STATUS_OK;
 }
 
 /*******************************************************************************
@@ -1237,15 +1228,17 @@ static jint nativeNfcTag_doReconnect(JNIEnv*, jobject) {
 
   // This shall not be done if reconnect is done for
   // transceive() failed on Mifare tag
-  if ((retCode == NFA_STATUS_OK) && (sCurrentConnectedHandle != 0) &&
-      sReselectDiscRestart) {
+  if (((retCode == NFA_STATUS_OK) ||
+       (retCode == STATUS_CODE_TARGET_MISMATCH)) &&
+      (sCurrentConnectedHandle != 0) && sReselectDiscRestart) {
     // reselect() is always done on first handle
     // Variables need to be updated
-    LOG(DEBUG) << StringPrintf(
+    LOG(WARNING) << StringPrintf(
         "%s; switched back to handle 0, restore internal state", __func__);
     sCurrentConnectedTargetType = natTag.mTechList[0];
     sCurrentConnectedTargetProtocol = natTag.mTechLibNfcTypes[0];
     sCurrentConnectedHandle = 0;
+    retCode = NFA_STATUS_OK;
   }
 
 TheEnd:
@@ -1775,8 +1768,14 @@ static jint nativeNfcTag_doCheckNdef(JNIEnv* e, jobject o, jintArray ndefInfo) {
   struct timespec timeout;
   // Get current time
   clock_gettime(CLOCK_REALTIME, &timeout);
-  // wait 3s
-  timeout.tv_sec += 3;
+  if (gIsDtaEnabled == true) {
+    // wait 6s to pass NFC Forum tests with nretry=5
+    timeout.tv_sec += 6;
+  } else {
+    // wait 3s
+    timeout.tv_sec += 3;
+  }
+
   /* Wait for check NDEF completion status */
   if (sem_timedwait(&sCheckNdefSem, &timeout)) {
     LOG(ERROR) << StringPrintf(

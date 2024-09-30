@@ -210,14 +210,17 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_CONNECT_EVT: {
-      SyncEventGuard guard(StNdefNfcee.mEeCreateConnEvent);
-      LOG(DEBUG) << StringPrintf(
-          "%s; NFA_EE_CONNECT_EVT; status=%u, handle=0x%02X, interface=0x%02X",
-          fn, eventData->connect.status, eventData->connect.ee_handle,
-          eventData->connect.ee_interface);
+      if (eventData->connect.ee_handle == (0x10 | NFA_HANDLE_GROUP_EE)) {
+        SyncEventGuard guard(StNdefNfcee.mEeCreateConnEvent);
+        LOG(DEBUG) << StringPrintf(
+            "%s; NFA_EE_CONNECT_EVT; status=%u, handle=0x%02X, "
+            "interface=0x%02X",
+            fn, eventData->connect.status, eventData->connect.ee_handle,
+            eventData->connect.ee_interface);
 
-      StNdefNfcee.mNfaEECbStatus = eventData->connect.status;
-      StNdefNfcee.mEeCreateConnEvent.notifyOne();
+        StNdefNfcee.mNfaEECbStatus = eventData->connect.status;
+        StNdefNfcee.mEeCreateConnEvent.notifyOne();
+      }
     } break;
 
     case NFA_EE_DATA_EVT: {
@@ -236,30 +239,13 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
     } break;
 
     case NFA_EE_DISCONNECT_EVT: {
-      LOG(DEBUG) << StringPrintf("%s; NFA_EE_DISCONNECT_EVT; handle=0x%02X", fn,
-                                 eventData->data.handle);
-      // mEeDisconnEvent
-      SyncEventGuard guard(StNdefNfcee.mEeDisconnEvent);
-      StNdefNfcee.mEeDisconnEvent.notifyOne();
-    } break;
-
-    case NFA_EE_SET_TECH_CFG_EVT:
-      LOG(DEBUG) << StringPrintf("%s; NFA_EE_SET_TECH_CFG_EVT; status=0x%X", fn,
-                                 eventData->status);
-      // StRoutingManager::getInstance().nfaEeCallback(event, eventData);
-      break;
-    case NFA_EE_SET_PROTO_CFG_EVT:
-      LOG(DEBUG) << StringPrintf("%s; NFA_EE_SET_PROTO_CFG_EVT; status=0x%X",
-                                 fn, eventData->status);
-      break;
-    case NFA_EE_UPDATED_EVT: {
-      LOG(DEBUG) << StringPrintf("%s; NFA_EE_UPDATED_EVT", fn);
-      break;
-    }
-    case NFA_EE_REMOVE_AID_EVT: {
-      LOG(DEBUG) << StringPrintf("%s; NFA_EE_REMOVE_AID_EVT  status=%u", fn,
-                                 eventData->status);
-      StRoutingManager::getInstance().notifyAidAdded();
+      if (eventData->data.handle == (0x10 | NFA_HANDLE_GROUP_EE)) {
+        LOG(DEBUG) << StringPrintf("%s; NFA_EE_DISCONNECT_EVT; handle=0x%02X",
+                                   fn, eventData->data.handle);
+        // mEeDisconnEvent
+        SyncEventGuard guard(StNdefNfcee.mEeDisconnEvent);
+        StNdefNfcee.mEeDisconnEvent.notifyOne();
+      }
     } break;
 
       // Events not processed by this object
@@ -271,13 +257,12 @@ void StNdefNfcee::nfaEeCallback(tNFA_EE_EVT event,
     case NFA_EE_ACTION_EVT:
     case NFA_EE_CLEAR_TECH_CFG_EVT:
     case NFA_EE_REMOVE_SYSCODE_EVT:
+    case NFA_EE_SET_TECH_CFG_EVT:
+    case NFA_EE_SET_PROTO_CFG_EVT:
+    case NFA_EE_ADD_AID_EVT:
+    case NFA_EE_REMOVE_AID_EVT:
+    case NFA_EE_UPDATED_EVT:
       break;
-
-    case NFA_EE_ADD_AID_EVT: {
-      LOG(DEBUG) << StringPrintf("%s; NFA_EE_ADD_AID_EVT  status=%u", fn,
-                                 eventData->status);
-      StRoutingManager::getInstance().notifyAidAdded();
-    } break;
 
     default:
       LOG(ERROR) << StringPrintf("%s; unknown event=%u ????", fn, event);

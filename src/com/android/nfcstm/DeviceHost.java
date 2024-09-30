@@ -185,8 +185,6 @@ public interface DeviceHost {
 
     public boolean unrouteAid(byte[] aid);
 
-    public boolean clearAidTable();
-
     public boolean commitRouting();
 
     public void registerT3tIdentifier(byte[] t3tIdentifier);

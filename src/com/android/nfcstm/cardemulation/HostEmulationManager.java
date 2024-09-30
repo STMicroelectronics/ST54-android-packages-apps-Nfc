@@ -68,6 +68,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 public class HostEmulationManager {
@@ -169,7 +173,10 @@ public class HostEmulationManager {
                 @Override
                 public void run() {
                     synchronized (mLock) {
-                        Log.d(TAG, "Have been outside field, returning to idle state");
+                        Log.d(
+                                TAG,
+                                "mReturnToIdleStateRunnable.run() - Have been outside field,"
+                                        + " returning to idle state");
                         mPendingPollingLoopFrames = null;
                         mPollingFramesToSend = null;
                         mPollingLoopState = PollingLoopState.EVALUATING_POLLING_LOOP;
@@ -269,6 +276,16 @@ public class HostEmulationManager {
     @TargetApi(35)
     @FlaggedApi(android.nfc.Flags.FLAG_NFC_OBSERVE_MODE)
     public void updateForShouldDefaultToObserveMode(boolean enabled) {
+        final Runnable hostEmulationRun =
+                new HostEmulationRunnable(RUN_EVENT_CE_OBS_MODE, (Object) enabled);
+        mHostEmulationScheduledTask =
+                mHostEmulationScheduler.schedule(hostEmulationRun, 0, TimeUnit.MILLISECONDS);
+    }
+
+    @TargetApi(35)
+    @FlaggedApi(android.nfc.Flags.FLAG_NFC_OBSERVE_MODE)
+    public void shouldDefaultToObserveMode(boolean enabled) {
+        Log.d(TAG, "shouldDefaultToObserveMode() - enabled: " + enabled);
         synchronized (mLock) {
             if (!isHostCardEmulationActivated()) {
                 NfcAdapter adapter = NfcAdapter.getDefaultAdapter(mContext);
@@ -583,6 +600,13 @@ public class HostEmulationManager {
     }
 
     public void onFieldChangeDetected(boolean fieldOn) {
+        final Runnable hostEmulationRun =
+                new HostEmulationRunnable(RUN_EVENT_CE_FIELD_EVT, (Object) fieldOn);
+        mHostEmulationScheduledTask =
+                mHostEmulationScheduler.schedule(hostEmulationRun, 0, TimeUnit.MILLISECONDS);
+    }
+
+    public void fieldChangeDetected(boolean fieldOn) {
         mHandler.removeCallbacks(mReturnToIdleStateRunnable);
         if (!fieldOn) {
             mHandler.postDelayed(mReturnToIdleStateRunnable, FIELD_OFF_IDLE_DELAY_MS);
@@ -596,6 +620,13 @@ public class HostEmulationManager {
 
     public void onHostEmulationActivated() {
         Log.d(TAG, "onHostEmulationActivated()");
+        final Runnable hostEmulationRun = new HostEmulationRunnable(RUN_EVENT_CE_ACTIVATED, null);
+        mHostEmulationScheduledTask =
+                mHostEmulationScheduler.schedule(hostEmulationRun, 0, TimeUnit.MILLISECONDS);
+    }
+
+    public void hostEmulationActivated() {
+        Log.d(TAG, "hostEmulationActivated()");
         synchronized (mLock) {
             mHandler.removeCallbacks(mReturnToIdleStateRunnable);
             // Regardless of what happens, if we're having a tap again
@@ -604,7 +635,7 @@ public class HostEmulationManager {
             intent.setPackage(NFC_PACKAGE);
             mContext.sendBroadcastAsUser(intent, UserHandle.ALL);
             if (mState != STATE_IDLE && mState != STATE_POLLING_LOOP) {
-                Log.e(TAG, "onHostEmulationActivated() - Got activation event in non-idle state");
+                Log.e(TAG, "hostEmulationActivated() - Got activation event in non-idle state");
             }
             mState = STATE_W4_SELECT;
         }
@@ -638,6 +669,14 @@ public class HostEmulationManager {
 
     public void onHostEmulationData(byte[] data) {
         Log.d(TAG, "onHostEmulationData()");
+        final Runnable hostEmulationRun =
+                new HostEmulationRunnable(RUN_EVENT_CE_DATA, (Object) data);
+        mHostEmulationScheduledTask =
+                mHostEmulationScheduler.schedule(hostEmulationRun, 0, TimeUnit.MILLISECONDS);
+    }
+
+    public void hostEmulationData(byte[] data) {
+        Log.d(TAG, "hostEmulationData()");
         mHandler.removeCallbacks(mReturnToIdleStateRunnable);
         mHandler.removeCallbacks(mEnableObserveModeAfterTransactionRunnable);
         String selectAid = findSelectAid(data);
@@ -646,10 +685,10 @@ public class HostEmulationManager {
         AidResolveInfo resolveInfo = null;
         synchronized (mLock) {
             if (mState == STATE_IDLE) {
-                Log.e(TAG, "onHostEmulationData() - Got data in idle state.");
+                Log.e(TAG, "hostEmulationData() - Got data in idle state.");
                 return;
             } else if (mState == STATE_W4_DEACTIVATE) {
-                Log.e(TAG, "onHostEmulationData() - Dropping APDU in STATE_W4_DECTIVATE");
+                Log.e(TAG, "hostEmulationData() - Dropping APDU in STATE_W4_DECTIVATE");
                 return;
             }
             if (selectAid != null) {
@@ -660,14 +699,21 @@ public class HostEmulationManager {
                 resolveInfo = mAidCache.resolveAid(selectAid);
                 if (resolveInfo == null || resolveInfo.services.size() == 0) {
                     if (selectAid.equals(NDEF_V1_AID) || selectAid.equals(NDEF_V2_AID)) {
-                        Log.w(TAG, "Can't route NDEF AID, sending AID_NOT_FOUND");
+                        Log.w(
+                                TAG,
+                                "hostEmulationData() - Can't route NDEF AID, sending"
+                                        + " AID_NOT_FOUND");
                     } else if (!mPowerManager.isScreenOn()) {
                         Log.i(
                                 TAG,
-                                "Screen is off, sending AID_NOT_FOUND, but not triggering bug"
-                                        + " report");
+                                "hostEmulationData() - Screen is off, sending AID_NOT_FOUND, but"
+                                        + " not triggering bug report");
                     } else {
-                        Log.w(TAG, "Can't handle AID " + selectAid + " sending AID_NOT_FOUND");
+                        Log.w(
+                                TAG,
+                                "hostEmulationData() - Can't handle AID "
+                                        + selectAid
+                                        + " sending AID_NOT_FOUND");
                         if (mUnroutableAidBugReportRunnable != null) {
                             mUnroutableAidBugReportRunnable.addAid(selectAid);
                         } else {
@@ -710,7 +756,7 @@ public class HostEmulationManager {
                             && mKeyguard.isKeyguardLocked()) {
                         NfcService.getInstance().sendRequireUnlockIntent();
                         NfcService.getInstance().sendData(AID_NOT_FOUND);
-                        if (DBG) Log.d(TAG, "onHostEmulationData() - !show toast");
+                        if (DBG) Log.d(TAG, "hostEmulationData() - !show toast");
                         if (mStatsdUtils != null) {
                             mStatsdUtils.logCardEmulationWrongSettingEvent();
                         }
@@ -719,7 +765,7 @@ public class HostEmulationManager {
                     }
                     if (defaultServiceInfo.requiresScreenOn() && !mPowerManager.isScreenOn()) {
                         NfcService.getInstance().sendData(AID_NOT_FOUND);
-                        if (DBG) Log.d(TAG, "requiresScreenOn()!");
+                        if (DBG) Log.d(TAG, "hostEmulationData() - requiresScreenOn()!");
                         if (mStatsdUtils != null) {
                             mStatsdUtils.logCardEmulationWrongSettingEvent();
                         }
@@ -730,8 +776,8 @@ public class HostEmulationManager {
                     if (!defaultServiceInfo.isOnHost()) {
                         Log.e(
                                 TAG,
-                                "onHostEmulationData() - AID that was meant to go off-host was"
-                                        + " routed to host. Check routing table configuration.");
+                                "hostEmulationData() - AID that was meant to go off-host was routed"
+                                        + " to host. Check routing table configuration.");
                         NfcService.getInstance().sendData(AID_NOT_FOUND);
                         if (mStatsdUtils != null) {
                             mStatsdUtils.logCardEmulationNoRoutingEvent();
@@ -778,11 +824,11 @@ public class HostEmulationManager {
                         Messenger existingService =
                                 bindServiceIfNeededLocked(user.getIdentifier(), resolvedService);
                         if (existingService != null) {
-                            Log.d(TAG, "onHostEmulationData() - Binding to existing service");
+                            Log.d(TAG, "hostEmulationData() - Binding to existing service");
                             sendDataToServiceLocked(existingService, data);
                         } else {
                             // Waiting for service to be bound
-                            Log.d(TAG, "onHostEmulationData() - Waiting for new service.");
+                            Log.d(TAG, "hostEmulationData() - Waiting for new service.");
                             // Queue SELECT APDU to be used
                             mSelectApdu = data;
                             mState = STATE_W4_SERVICE;
@@ -803,13 +849,13 @@ public class HostEmulationManager {
                     } else {
                         Log.d(
                                 TAG,
-                                "onHostEmulationData() - Dropping non-select APDU in"
+                                "hostEmulationData() - Dropping non-select APDU in"
                                         + " STATE_W4_SELECT");
                         NfcService.getInstance().sendData(UNKNOWN_ERROR);
                     }
                     break;
                 case STATE_W4_SERVICE:
-                    Log.d(TAG, "Unexpected APDU in STATE_W4_SERVICE");
+                    Log.d(TAG, "hostEmulationData() - Unexpected APDU in STATE_W4_SERVICE");
                     break;
                 case STATE_XFER:
                     if (selectAid != null) {
@@ -829,9 +875,7 @@ public class HostEmulationManager {
                         sendDataToServiceLocked(mActiveService, data);
                     } else {
                         // No SELECT AID and no active service.
-                        Log.d(
-                                TAG,
-                                "onHostEmulationData() - Service no longer bound, dropping APDU");
+                        Log.d(TAG, "hostEmulationData() - Service no longer bound, dropping APDU");
                     }
                     break;
             }
@@ -840,12 +884,18 @@ public class HostEmulationManager {
 
     public void onHostEmulationDeactivated() {
         Log.d(TAG, "onHostEmulationDeactivated()");
+        final Runnable hostEmulationRun = new HostEmulationRunnable(RUN_EVENT_CE_DEACTIVATED, null);
+        mHostEmulationScheduledTask =
+                mHostEmulationScheduler.schedule(hostEmulationRun, 0, TimeUnit.MILLISECONDS);
+    }
+
+    public void hostEmulationDeactivated() {
+        Log.d(TAG, "hostEmulationDeactivated()");
         synchronized (mLock) {
             if (mState == STATE_IDLE) {
                 Log.e(
                         TAG,
-                        "onHostEmulationDeactivated() - Got deactivation event while in idle"
-                                + " state");
+                        "hostEmulationDeactivated() - Got deactivation event while in idle state");
             }
             sendDeactivateToActiveServiceLocked(HostApduService.DEACTIVATION_LINK_LOSS);
             resetActiveService();
@@ -861,7 +911,10 @@ public class HostEmulationManager {
             }
 
             if (mEnableObserveModeAfterTransaction) {
-                Log.d(TAG, "HCE deactivated, will re-enable observe mode.");
+                Log.d(
+                        TAG,
+                        "hostEmulationDeactivated() - HCE deactivated, will re-enable observe"
+                                + " mode.");
                 mHandler.postDelayed(
                         mEnableObserveModeAfterTransactionRunnable,
                         RE_ENABLE_OBSERVE_MODE_DELAY_MS);
@@ -1441,5 +1494,64 @@ public class HostEmulationManager {
     @VisibleForTesting
     public Map<Integer, Map<Pattern, List<ApduServiceInfo>>> getPollingLoopPatternFilters() {
         return mPollingLoopPatternFilters;
+    }
+
+    private final ScheduledExecutorService mHostEmulationScheduler =
+            Executors.newScheduledThreadPool(1);
+    private ScheduledFuture<?> mHostEmulationScheduledTask = null;
+
+    final int RUN_EVENT_CE_ACTIVATED = 0;
+    final int RUN_EVENT_CE_DATA = 1;
+    final int RUN_EVENT_CE_DEACTIVATED = 2;
+    final int RUN_EVENT_CE_FIELD_EVT = 3;
+    final int RUN_EVENT_CE_OBS_MODE = 4;
+
+    private class HostEmulationRunnable implements Runnable {
+        private int mCbType;
+        private boolean mFieldStatus, mObsModeStatus;
+        private byte[] mData;
+
+        public HostEmulationRunnable(int type, Object param1) {
+            mCbType = type;
+            switch (mCbType) {
+                case RUN_EVENT_CE_DATA:
+                    mData = (byte[]) param1;
+                    break;
+                case RUN_EVENT_CE_FIELD_EVT:
+                    mFieldStatus = (boolean) param1;
+                    break;
+                case RUN_EVENT_CE_OBS_MODE:
+                    mObsModeStatus = (boolean) param1;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        @Override
+        public void run() {
+            switch (mCbType) {
+                case RUN_EVENT_CE_ACTIVATED:
+                    Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_ACTIVATED)");
+                    hostEmulationActivated();
+                    break;
+                case RUN_EVENT_CE_DATA:
+                    Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_DATA)");
+                    hostEmulationData(mData);
+                    break;
+                case RUN_EVENT_CE_DEACTIVATED:
+                    Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_DEACTIVATED)");
+                    hostEmulationDeactivated();
+                    break;
+                case RUN_EVENT_CE_FIELD_EVT:
+                    Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_FIELD_EVT)");
+                    fieldChangeDetected(mFieldStatus);
+                    break;
+                case RUN_EVENT_CE_OBS_MODE:
+                    Log.d(TAG, "HostEmulationRunnable.run(RUN_EVENT_CE_OBS_MODE)");
+                    shouldDefaultToObserveMode(mObsModeStatus);
+                    break;
+            }
+        }
     }
 }

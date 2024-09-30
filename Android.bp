@@ -48,7 +48,7 @@ java_defaults {
         proguard_flags_files: ["proguard.flags"],
     },
     jarjar_rules: "jarjar-rules.txt",
-    privapp_allowlist: ":privapp_allowlist_com.android.nfcstm.xml",
+    privapp_allowlist: ":privapp_allowlist_com.android.st.nfc.xml",
 }
 
 //########################################
@@ -138,5 +138,6 @@ filegroup {
 
 filegroup {
     name: "privapp_allowlist_com.android.st.nfc.xml",
+    system_ext_specific: true,
     srcs: ["com.android.nfcstm.xml"],
 }

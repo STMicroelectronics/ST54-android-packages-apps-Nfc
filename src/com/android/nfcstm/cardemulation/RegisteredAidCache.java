@@ -358,12 +358,9 @@ public class RegisteredAidCache {
                                 + " because it's not the payment default.)");
         } else {
             if (serviceAidInfo.service.isCategoryOtherServiceEnabled()) {
-                if (VDBG)
-                    Log.d(
-                            TAG,
-                            "resolveAidLocked: "
-                                    + serviceAidInfo.service.getComponent()
-                                    + " is selected other service");
+                // if (VDBG) Log.d(TAG, "resolveAidLocked: " + serviceAidInfo.service.getComponent()
+                // +
+                //         " is selected other service");
                 resolveInfo.services.add(serviceAidInfo.service);
             }
         }
@@ -372,18 +369,15 @@ public class RegisteredAidCache {
     private static void nonDefaultRouting(
             AidResolveInfo resolveInfo, boolean makeSingleServiceDefault) {
         if (resolveInfo.services.size() == 1 && makeSingleServiceDefault) {
-            if (DBG)
-                Log.d(
-                        TAG,
-                        "resolveAidLocked: DECISION: making single handling service "
-                                + resolveInfo.services.get(0).getComponent()
-                                + " default.");
+            // if (DBG) Log.d(TAG,
+            //         "resolveAidLocked: DECISION: making single handling service " +
+            //                 resolveInfo.services.get(0).getComponent() + " default.");
             resolveInfo.defaultService = resolveInfo.services.get(0);
         } else {
             // Nothing to do, all services already in list
-            if (DBG) {
-                Log.d(TAG, "resolveAidLocked: DECISION: routing to all matching services");
-            }
+            // if (DBG) {
+            //     Log.d(TAG, "resolveAidLocked: DECISION: routing to all matching services");
+            // }
         }
     }
 
@@ -547,7 +541,8 @@ public class RegisteredAidCache {
             ArrayList<ServiceAidInfo> aidServices, ArrayList<ServiceAidInfo> conflictingServices) {
         // No children that are preferred; add all services of the root
         // make single service default if no children are present
-        if (DBG) Log.d(TAG, "noChildrenAidsPreferred() - No service has preference, adding all.");
+        // if (DBG) Log.d(TAG, "noChildrenAidsPreferred() - No service has preference, adding
+        // all.");
         AidResolveInfo resolveinfo =
                 resolveAidConflictLocked(aidServices, conflictingServices.isEmpty());
         // If the AID is subsetAID check for conflicting prefix in all
@@ -629,8 +624,9 @@ public class RegisteredAidCache {
                     if (DBG)
                         Log.d(
                                 TAG,
-                                "One of the conflicting AID registrations is wallet holder "
-                                        + "or foreground preferred, ignoring prefix.");
+                                "resolveAidConflictLocked() - One of the conflicting AID"
+                                        + " registrations is wallet holder or foreground preferred,"
+                                        + " ignoring prefix.");
                     return EMPTY_RESOLVE_INFO;
                 } else {
                     return noChildrenAidsPreferred(aidServices, conflictingServices);
@@ -1184,7 +1180,12 @@ public class RegisteredAidCache {
         }
         if (DBG) {
             for (String key : mAidCache.keySet()) {
-                Log.d(TAG, "aid cache entry" + key + " val:" + mAidCache.get(key).toString());
+                Log.d(
+                        TAG,
+                        "generateAidCacheLocked() - AID: "
+                                + key
+                                + " val:"
+                                + mAidCache.get(key).toString());
             }
         }
         updateRoutingLocked(false);

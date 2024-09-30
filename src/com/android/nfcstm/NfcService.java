@@ -250,7 +250,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     static final int MSG_UPDATE_ISODEP_PROTOCOL_ROUTE = 22;
     static final int MSG_UPDATE_TECHNOLOGY_AB_ROUTE = 23;
 
-    static final int MSG_CLEAR_ROUTING = 24;
+    // static final int MSG_CLEAR_ROUTING = 24;
     static final int MSG_UPDATE_ROUTING_TABLE = 25;
     static final int MSG_START_POLLING = 26;
     static final int MSG_COMMIT_ROUTING_FORCED = 27;
@@ -2172,6 +2172,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                     return;
                 }
                 mState = newState;
+                if (DBG) Log.d(TAG, "updateState() - mState = " + mState);
                 if (mState == NfcAdapter.STATE_ON && mCardEmulationManager != null) {
                     mCardEmulationManager.updateForShouldDefaultToObserveMode(getUserId());
                 }
@@ -6447,14 +6448,14 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     boolean mIsForcedRouting = false;
 
     /** Empty AID routing table before writting new one */
-    public void clearRouting() {
-        mHandler.removeMessages(MSG_COMMIT_ROUTING);
-        mHandler.removeMessages(MSG_ROUTE_AID);
-        mHandler.removeMessages(MSG_CLEAR_ROUTING);
-        mHandler.removeMessages(MSG_UNROUTE_AID);
-        mHandler.removeMessages(MSG_COMMIT_ROUTING_FORCED);
-        mHandler.sendEmptyMessage(MSG_CLEAR_ROUTING);
-    }
+    // public void clearRouting() {
+    //     mHandler.removeMessages(MSG_COMMIT_ROUTING);
+    //     mHandler.removeMessages(MSG_ROUTE_AID);
+    //     mHandler.removeMessages(MSG_CLEAR_ROUTING);
+    //     mHandler.removeMessages(MSG_UNROUTE_AID);
+    //     mHandler.removeMessages(MSG_COMMIT_ROUTING_FORCED);
+    //     mHandler.sendEmptyMessage(MSG_CLEAR_ROUTING);
+    // }
 
     /**
      * Start forced routing mode: This happens when a foreground app has caused the routing table to
@@ -6597,6 +6598,7 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     public void updateRoutingTable() {
         Log.i(TAG, "updateRoutingTable() ");
 
+        // RT variables need cleaning to force RT update
         mAidRoutingManager.onNfccRoutingTableCleared();
         mCardEmulationManager.onRoutingTableChanged();
 
@@ -6659,6 +6661,13 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
     }
 
     public void clearRoutingTable(int clearFlags) {
+        // Remove any previously sent messages not yet processed
+        mHandler.removeMessages(MSG_COMMIT_ROUTING);
+        mHandler.removeMessages(MSG_ROUTE_AID);
+        mHandler.removeMessages(MSG_CLEAR_ROUTING_TABLE);
+        mHandler.removeMessages(MSG_UNROUTE_AID);
+        mHandler.removeMessages(MSG_COMMIT_ROUTING_FORCED);
+        // Only last sent command counts
         sendMessage(MSG_CLEAR_ROUTING_TABLE, clearFlags);
     }
 
@@ -6843,14 +6852,6 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                         Log.d(TAG, "NfcServiceHandler - handleMessage(MSG_UPDATE_ROUTING_TABLE)");
                     updateRoutingTable();
                     break;
-
-                case MSG_CLEAR_ROUTING:
-                    {
-                        if (DBG) Log.d(TAG, "NfcServiceHandler - handleMessage(MSG_CLEAR_ROUTING)");
-
-                        mDeviceHost.clearAidTable();
-                        break;
-                    }
 
                 case MSG_MOCK_NDEF:
                     {
@@ -7911,12 +7912,14 @@ public class NfcService implements DeviceHostListener, ForegroundUtils.Callback 
                             }
                         }
 
+                        // Do not postpone if we have request to wake screen up upon CE
                         if ((1
                                         == Settings.Global.getInt(
                                                 mContext.getContentResolver(),
                                                 "nfc_rf_field_active",
                                                 -1))
-                                && !mIsFelicaFSI) {
+                                && !mIsFelicaFSI
+                                && !mIsRequestUnlockShowed) {
                             Log.d(TAG, "MSG_APPLY_SCREEN_STATE postponing due to RF FIELD ON");
                             mPendingPowerStateUpdate = true;
                         } else {
